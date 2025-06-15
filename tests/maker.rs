@@ -191,6 +191,7 @@ fn test_maker() {
     let mut maker_opt: Option<Child> = None;
     // Run main test logic in a closure to catch panics or errors
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        info!("🚀 Starting and configuring makerd");
         let (rx, maker) = maker_cli.start_and_configure_makerd();
         maker_opt = Some(maker);
 
@@ -229,6 +230,8 @@ fn test_maker() {
 
         info!("🎉 All maker tests completed successfully");
     }
+
+    info!("🎉 All maker tests completed successfully");
 }
 
 /// Tests maker's handling of an unexpected shutdown while waiting for fidelity bond confirmation.
