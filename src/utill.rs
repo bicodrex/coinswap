@@ -667,6 +667,8 @@ struct Termios {
 const ECHO: u32 = 0x00000008;
 // Action to apply terminal attributes immediately
 const TCSANOW: i32 = 0;
+// ICANON flag: enables canonical (line-buffered) input mode
+const ICANON: u32 = 0o0000002;
 
 // Foreign Function Interface (FFI) declarations
 // Bindings to C library functions from <termios.h>
@@ -674,9 +676,36 @@ extern "C" {
     fn tcgetattr(fd: i32, termios_p: *mut Termios) -> i32;
     fn tcsetattr(fd: i32, optional_actions: i32, termios_p: *const Termios) -> i32;
 }
+/// Sets the terminal input mode by enabling or disabling canonical mode and echo.
+///
+/// - When `echo` is `true`, the terminal behaves normally (line-buffered, characters visible).
+/// - When `echo` is `false`, input is read character-by-character and hidden (used for password input).
+///
+/// # Safety
+/// This function uses unsafe FFI calls and directly modifies terminal settings.
+/// Also needed for zeroing [`Termios`] struct.
+fn set_terminal_mode(fd: i32, echo: bool) {
+    unsafe {
+        let mut term: Termios = std::mem::zeroed(); // Create a zeroed termios struct
+        if tcgetattr(fd, &mut term) != 0 {
+            panic!("Failed to get terminal attributes");
+        }
+
+        if echo {
+            term.c_lflag |= ECHO | ICANON; // Enable echo and canonical mode
+        } else {
+            term.c_lflag &= !(ECHO | ICANON); // Disable echo and canonical mode
+        }
+        // Apply modified settings immediately
+        if tcsetattr(fd, TCSANOW, &term) != 0 {
+            panic!("Failed to set terminal attributes");
+        }
+    }
+}
 
 /// Prompts the user for a password using the given prompt string.
-/// Temporarily disables echo so input is hidden (like sudo password prompt).
+/// Temporarily disables canonical mode and echo to mask each typed
+/// character with `*` as feedback.
 pub fn prompt_password(message: &'static str) -> std::io::Result<String> {
     let stdin = io::stdin();
     let fd = stdin.as_raw_fd();
@@ -684,34 +713,48 @@ pub fn prompt_password(message: &'static str) -> std::io::Result<String> {
     print!("{message}");
     io::stdout().flush()?; // Ensure the prompt is printed
 
-    // Unsafe is required for FFI calls and raw pointer usage.
-    // Also needed for zeroing a struct with potentially unsafe fields.
-    unsafe {
-        let mut termios = std::mem::zeroed::<Termios>();
+    set_terminal_mode(fd, false); // disable echo & canonical mode
 
-        if tcgetattr(fd, &mut termios) != 0 {
-            return Err(io::Error::last_os_error());
+    let mut password = String::new();
+    // Buffer to read one byte at a time from stdin.
+    // We read input character-by-character because we disabled canonical mode (ICANON),
+    // which normally buffers input until Enter is pressed.
+    let mut buf = [0u8; 1];
+
+    while stdin.lock().read(&mut buf).unwrap() == 1 {
+        let c = buf[0] as char;
+        match c {
+            '\n' | '\r' => {
+                // - If the byte is newline (`\n`, ASCII 0x0A) or carriage return (`\r`, ASCII 0x0D),
+                //   it signals the end of input, so we break the loop.
+                println!();
+                break;
+            }
+            '\x08' | '\x7f' => {
+                // - If the byte is Backspace (ASCII 0x08 or 0x7f),
+                //   we remove the last character from the password (if any),
+                //   and erase the asterisk from the terminal by moving the cursor back,
+                //   writing a space to overwrite, then moving the cursor back again.
+                if !password.is_empty() {
+                    password.pop();
+                    print!("\x08 \x08");
+                    io::stdout().flush().unwrap();
+                }
+            }
+            _ => {
+                // - Otherwise, for any other character, we append it to the password string
+                //   and print an asterisk '*' as a visual placeholder for the typed character.
+                password.push(c);
+                print!("*");
+                io::stdout().flush().unwrap();
+            }
         }
-
-        let original = termios;
-
-        // Disable ECHO
-        termios.c_lflag &= !ECHO;
-
-        if tcsetattr(fd, TCSANOW, &termios) != 0 {
-            return Err(io::Error::last_os_error());
-        }
-
-        // Read password
-        let mut password = String::new();
-        stdin.read_line(&mut password)?;
-
-        // Restore terminal
-        tcsetattr(fd, TCSANOW, &original);
-
-        println!(); // move to next line after input
-        Ok(password.trim_end().to_string())
     }
+
+    set_terminal_mode(fd, true); // restore terminal settings
+
+    println!(); // move to next line after input
+    Ok(password.trim_end().to_string())
 }
 
 pub(crate) fn get_emphemeral_address(
