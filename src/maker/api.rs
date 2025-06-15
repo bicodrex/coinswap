@@ -274,7 +274,7 @@ impl Maker {
 
         rpc_config.wallet_name = wallet_file_name;
 
-        let mut wallet = Wallet::get_wallet(&wallet_path, &rpc_config)?;
+        let mut wallet = Wallet::load_or_init_wallet(&wallet_path, &rpc_config)?;
 
         // If the config file doesn't exist, the default config will be loaded.
         let mut config = MakerConfig::new(Some(&data_dir.join("config.toml")))?;
