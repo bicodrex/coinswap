@@ -231,8 +231,6 @@ fn test_maker() {
     // Panic if test logic failed or panicked
     if let Err(err) = result {
         panic!("Test panicked or failed: {:?}", err);
-
-        info!("🎉 All maker tests completed successfully");
     }
 
     info!("🎉 All maker tests completed successfully");
