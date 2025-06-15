@@ -18,7 +18,7 @@ use std::{
 };
 
 use super::swapcoin::{IncomingSwapCoin, OutgoingSwapCoin};
-use crate::wallet::UTXOSpendInfo;
+use crate::{utill, wallet::UTXOSpendInfo};
 use bitcoind::bitcoincore_rpc::bitcoincore_rpc_json::ListUnspentResultEntry;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -157,8 +157,10 @@ impl WalletStore {
             Some(material) => {
                 log::info!("Reading encrypted wallet");
 
-                let encrypted_wallet: EncryptedWalletStore =
-                    Self::from_slice_trim_trailing(reader.clone())?;
+                let encrypted_wallet: EncryptedWalletStore = utill::from_slice_trim_trailing::<
+                    EncryptedWalletStore,
+                    WalletError,
+                >(reader.clone())?;
 
                 let nonce_vec = encrypted_wallet.nonce.clone();
 
@@ -171,11 +173,14 @@ impl WalletStore {
                     .expect("Error decrypting wallet, wrong passphrase?");
 
                 Ok((
-                    Self::from_slice_trim_trailing(packed_wallet_store)?,
+                    utill::from_slice_trim_trailing::<Self, WalletError>(packed_wallet_store)?,
                     Some(nonce_vec.clone()),
                 ))
             }
-            None => Ok((Self::from_slice_trim_trailing(reader)?, None)),
+            None => Ok((
+                utill::from_slice_trim_trailing::<Self, WalletError>(reader)?,
+                None,
+            )),
         }
     }
 }
