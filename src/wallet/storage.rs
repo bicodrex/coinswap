@@ -23,9 +23,14 @@ use bitcoind::bitcoincore_rpc::bitcoincore_rpc_json::ListUnspentResultEntry;
 
 /// Wrapper struct for storing an encrypted wallet on disk.
 ///
-/// The standard `WalletStore` is first serialized to CBOR, then encrypted using AES-GCM.
+/// The standard `WalletStore` is first serialized to CBOR, then encrypted using
+/// [AES-GCM](https://en.wikipedia.org/wiki/Galois/Counter_Mode).
+///
 /// The resulting ciphertext is stored in `encrypted_wallet_store`, and the AES-GCM
 /// nonce used for encryption is stored in `nonce`.
+///
+/// Note: The term “IV” (Initialization Vector) used in AES-GCM — including in the linked Wikipedia page —
+/// refers to the same value as the nonce. They are conceptually the same in this context.
 ///
 /// This wrapper itself is then serialized to CBOR and written to disk.
 #[derive(Serialize, Deserialize, Debug)]
@@ -158,7 +163,7 @@ impl WalletStore {
                 log::info!("Reading encrypted wallet");
 
                 // Deserialize the outer EncryptedWalletStore wrapper.
-                let encrypted_wallet: EncryptedWalletStore = utill::from_slice_trim_trailing::<
+                let encrypted_wallet: EncryptedWalletStore = utill::deserialize_from_cbor::<
                     EncryptedWalletStore,
                     WalletError,
                 >(reader.clone())?;
@@ -177,14 +182,14 @@ impl WalletStore {
 
                 // Deserialize the decrypted WalletStore and return it with the nonce.
                 Ok((
-                    utill::from_slice_trim_trailing::<Self, WalletError>(packed_wallet_store)?,
+                    utill::deserialize_from_cbor::<Self, WalletError>(packed_wallet_store)?,
                     Some(nonce_vec.clone()),
                 ))
             }
             None => {
                 // If no encryption key is provided, deserialize the WalletStore directly.
                 Ok((
-                    utill::from_slice_trim_trailing::<Self, WalletError>(reader)?,
+                    utill::deserialize_from_cbor::<Self, WalletError>(reader)?,
                     None,
                 ))
             }
