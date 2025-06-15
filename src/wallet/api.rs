@@ -56,9 +56,16 @@ use super::{
 const HARDENDED_DERIVATION: &str = "m/84'/1'/0'";
 
 /// Salt used for key derivation from a user-provided passphrase.
-const ENCRYPTION_SALT: &[u8; 8] = b"coinswap";
+const PBKDF2_SALT: &[u8; 8] = b"coinswap";
 /// Number of PBKDF2 iterations to strengthen passphrase-derived keys.
-const ENCRYPTION_ITERATIONS: u32 = if cfg!(feature = "integration-test") || cfg!(test) {
+///
+/// In production, this is set to **600,000 iterations**, following
+/// modern password security guidance from the
+/// [OWASP Password Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html).
+///
+/// During testing or integration tests, the iteration count is reduced to 1
+/// for performance.
+const PBKDF2_ITERATIONS: u32 = if cfg!(feature = "integration-test") || cfg!(test) {
     1
 } else {
     600_000
@@ -360,8 +367,8 @@ impl Wallet {
             // Derive a 256-bit encryption key from the passphrase using PBKDF2.
             let derived_key = pbkdf2_hmac_array::<Sha256, 32>(
                 wallet_enc_password.as_bytes(),
-                ENCRYPTION_SALT,
-                ENCRYPTION_ITERATIONS,
+                PBKDF2_SALT,
+                PBKDF2_ITERATIONS,
             );
             // Generate a nonce only if creating a new wallet, else defer nonce reading.
             let nonce = if path.exists() {
