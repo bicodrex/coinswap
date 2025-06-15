@@ -144,31 +144,6 @@ impl WalletStore {
         Ok(())
     }
 
-    fn from_slice_trim_trailing<T>(mut reader: Vec<u8>) -> Result<T, WalletError>
-    where
-        T: serde::de::DeserializeOwned,
-    {
-        match serde_cbor::from_slice::<T>(&reader) {
-            Ok(store) => Ok(store),
-            Err(e) => {
-                let err_string = format!("{:?}", e);
-                if err_string.contains("code: TrailingData") {
-                    // Defensive error handling - monitor logs to confirm wallet files stay clean.
-                    log::info!("Wallet file has trailing data, trying to restore");
-                    loop {
-                        reader.pop();
-                        match serde_cbor::from_slice::<T>(&reader) {
-                            Ok(store) => break Ok(store),
-                            Err(_) => continue,
-                        }
-                    }
-                } else {
-                    Err(e.into())
-                }
-            }
-        }
-    }
-
     /// Reads from a path (errors if path doesn't exist).
     /// If `store_enc_material` is provided, attempts to decrypt the file using the
     /// provided key. Returns the deserialized `WalletStore` and the nonce.
