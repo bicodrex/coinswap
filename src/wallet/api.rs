@@ -277,7 +277,7 @@ impl Wallet {
     }
 
     pub fn get_name(&self) -> &str {
-        return self.wallet_file_path.to_str().unwrap();
+        return &self.store.file_name;
     }
 
     pub fn backup(&self, path: PathBuf) {
