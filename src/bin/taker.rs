@@ -8,7 +8,7 @@ use coinswap::{
 };
 use log::LevelFilter;
 use serde_json::{json, to_string_pretty};
-use std::{path::PathBuf, str::FromStr};
+use std::{env, path::PathBuf, str::FromStr};
 /// A simple command line app to operate as coinswap client.
 ///
 /// The app works as a regular Bitcoin wallet with the added capability to perform coinswaps. The app
@@ -105,6 +105,12 @@ enum Commands {
     },
     /// Recover from all failed swaps
     Recover,
+
+    /// Backup the wallet
+    WalletBackup,
+
+    /// Restore the wallet
+    WalletRestore,
 }
 
 fn main() -> Result<(), TakerError> {
@@ -251,6 +257,21 @@ fn main() -> Result<(), TakerError> {
         Commands::Recover => {
             taker.recover_from_swap()?;
         }
+        Commands::WalletBackup => {
+            // Ok to work after wallet loaded
+            println!("Initiating wallet backup.");
+            let wallet = taker.get_wallet();
+            println!("Backing up wallet: {}", wallet.get_name());
+            let working_directory: PathBuf = env::current_dir().expect("Failed to get current directory");
+            wallet.backup(working_directory);
+            println!("Wallet Backup Ended");
+        },
+        Commands::WalletRestore => {
+            // Does it need to run before taker::init?
+            println!("Initiating wallet restore.");
+
+            println!("Wallet Restore Ended");
+        },
     }
 
     Ok(())
