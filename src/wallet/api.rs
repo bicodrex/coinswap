@@ -3,6 +3,8 @@
 //! Currently, wallet synchronization is exclusively performed through RPC for makers.
 //! In the future, takers might adopt alternative synchronization methods, such as lightweight wallet solutions.
 
+use std::fs;
+use std::io::Write;
 use std::{convert::TryFrom, fmt::Display, path::PathBuf, str::FromStr};
 
 use std::collections::HashMap;
@@ -19,7 +21,8 @@ use bitcoin::{
     secp256k1,
     secp256k1::{Secp256k1, SecretKey},
     sighash::{EcdsaSighashType, SighashCache},
-    Address, Amount, OutPoint, PublicKey, Script, ScriptBuf, Transaction, Txid, VarInt, Weight,
+    Address, Amount, Network, OutPoint, PublicKey, Script, ScriptBuf, Transaction, Txid, VarInt,
+    Weight,
 };
 use bitcoind::bitcoincore_rpc::{bitcoincore_rpc_json::ListUnspentResultEntry, Client, RpcApi};
 use pbkdf2::pbkdf2_hmac_array;
@@ -81,6 +84,27 @@ pub struct KeyMaterial {
     /// When loading an existing wallet, this is initially `None`.
     /// It is populated after reading the stored nonce from disk.
     pub nonce: Option<Vec<u8>>,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct WalletBackup {
+    /// Network the wallet operates on.
+    pub(crate) network: Network, //Can be asked to the user, but is nice to save
+    /// The master key for the wallet.
+    pub(super) master_key: Xpriv,
+
+    pub(super) wallet_birthday: Option<u64>, //Avoid scanning from genesis block
+    /// The file name associated with the wallet store.
+    pub(crate) file_name: String, //Can be asked to user, or stored for convenience
+}
+impl From<&Wallet> for WalletBackup {
+    fn from(wallet: &Wallet) -> Self {
+        WalletBackup {
+            network: (wallet.store.network),
+            master_key: (wallet.store.master_key),
+            wallet_birthday: (wallet.store.wallet_birthday),
+            file_name: (wallet.store.file_name.clone()),
+        }
+    }
 }
 
 /// Represents a Bitcoin wallet with associated functionality and data.
@@ -295,6 +319,13 @@ impl Wallet {
         backup_path.set_extension("json");
 
         println!("Backing up to {:?}", backup_path);
+
+        let backup = WalletBackup::from(self);
+        
+        let json = serde_json::to_string_pretty(&backup).unwrap();
+        let mut file = fs::File::create(backup_path).unwrap();
+        file.write_all(json.as_bytes()).unwrap();
+
     }
 
     /// Load wallet data from file and connect to a core RPC.
