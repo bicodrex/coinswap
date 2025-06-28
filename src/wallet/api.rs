@@ -286,6 +286,17 @@ impl Wallet {
         })
     }
 
+    pub fn get_name(&self) -> &str {
+        return self.wallet_file_path.to_str().unwrap();
+    }
+
+    pub fn backup(&self, path: PathBuf) {
+        let mut backup_path = path.join(self.get_name());
+        backup_path.set_extension("json");
+
+        println!("Backing up to {:?}", backup_path);
+    }
+
     /// Load wallet data from file and connect to a core RPC.
     /// The core rpc wallet name, and wallet_id field in the file should match.
     /// If encryption material is provided, decrypt the wallet store using it.
