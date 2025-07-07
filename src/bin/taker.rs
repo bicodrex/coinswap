@@ -4,11 +4,15 @@ use clap::Parser;
 use coinswap::{
     taker::{error::TakerError, SwapParams, Taker, TakerBehavior},
     utill::{parse_proxy_auth, setup_taker_logger, ConnectionType, MIN_FEE_RATE, UTXO},
-    wallet::{Destination, RPCConfig},
+    wallet::{Destination, RPCConfig, WalletBackup},
 };
 use log::LevelFilter;
 use serde_json::{json, to_string_pretty};
-use std::{env, path::PathBuf, str::FromStr};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 /// A simple command line app to operate as coinswap client.
 ///
 /// The app works as a regular Bitcoin wallet with the added capability to perform coinswaps. The app
@@ -110,7 +114,10 @@ enum Commands {
     WalletBackup,
 
     /// Restore the wallet
-    WalletRestore,
+    WalletRestore {
+        #[clap(long, short = 'f')]
+        file: String,
+    },
 }
 
 fn main() -> Result<(), TakerError> {
@@ -261,16 +268,37 @@ fn main() -> Result<(), TakerError> {
             println!("Initiating wallet backup.");
             let wallet = taker.get_wallet();
             println!("Backing up wallet: {}", wallet.get_name());
-            let working_directory: PathBuf = env::current_dir().expect("Failed to get current directory");
+            let working_directory: PathBuf =
+                env::current_dir().expect("Failed to get current directory");
             wallet.backup(working_directory);
             println!("Wallet Backup Ended");
-        },
-        Commands::WalletRestore => {
+        }
+        Commands::WalletRestore { file } => {
             // Does it need to run before taker::init?
-            println!("Initiating wallet restore.");
+            println!("Initiating wallet restore, from backup: {}", file);
+            let content = fs::read_to_string(&file).expect("Failed to read backup");
+            //println!("Backup content: {}", content);
+            let wallet_backup: WalletBackup =
+                serde_json::from_str(&content).expect("Failed to deserialize wallet backup file");
+            //println!("Wallet_Backup: {:?}", wallet_backup);
 
-            println!("Wallet Restore Ended");
-        },
+            //let data_dir = data_dir.unwrap_or(get_taker_dir());
+            //let wallets_dir = data_dir.join("wallets");
+
+            // Use the provided name or default to `taker-wallet` if not specified.
+            let wallet_file_name = wallet_backup.file_name.clone();
+            //let wallet_path = wallets_dir.join(&wallet_file_name);
+            let mut rpc_config_test = rpc_config.clone();
+            rpc_config_test.wallet_name = wallet_file_name;
+
+            let restored_wallet =
+                wallet_backup.restore(Path::new("./taker-wallet"), &rpc_config_test);
+
+            println!(
+                "Wallet Restore Ended, this is the wallet: {:?}",
+                restored_wallet
+            );
+        }
     }
 
     Ok(())
