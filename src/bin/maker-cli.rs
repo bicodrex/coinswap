@@ -126,6 +126,7 @@ fn main() -> Result<(), MakerError> {
         Commands::SyncWallet => {
             send_rpc_req(stream, RpcMsgReq::SyncWallet)?;
         }
+        //Send the backup from makerd to marker-cli through rpc, add command here
     }
 
     Ok(())
