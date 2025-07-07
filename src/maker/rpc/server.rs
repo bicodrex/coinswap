@@ -128,6 +128,7 @@ fn handle_request(maker: &Arc<Maker>, socket: &mut TcpStream) -> Result<(), Make
                 RpcMsgResp::Pong
             }
         }
+        //This is the counterpart of marker-cli commands, this logic execute the command called
     };
 
     if let Err(e) = send_message(socket, &resp) {
