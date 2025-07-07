@@ -17,3 +17,4 @@ pub use spend::Destination;
 pub(crate) use swapcoin::{
     IncomingSwapCoin, OutgoingSwapCoin, SwapCoin, WalletSwapCoin, WatchOnlySwapCoin,
 };
+pub use api::WalletBackup;
