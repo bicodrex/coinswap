@@ -87,8 +87,12 @@ pub struct KeyMaterial {
     /// It is populated after reading the stored nonce from disk.
     pub nonce: Option<Vec<u8>>,
 }
-#[derive(Debug, Clone, Serialize)]
+/// Represents a wallet backup
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WalletBackup {
+    /// Add some type of versioning? maybe coinswap version?
+    /// Also add date of export for backup?
+
     /// Network the wallet operates on.
     pub(crate) network: Network, //Can be asked to the user, but is nice to save
     /// The master key for the wallet.
@@ -96,7 +100,7 @@ pub struct WalletBackup {
 
     pub(super) wallet_birthday: Option<u64>, //Avoid scanning from genesis block
     /// The file name associated with the wallet store.
-    pub(crate) file_name: String, //Can be asked to user, or stored for convenience
+    pub file_name: String, //Can be asked to user, or stored for convenience
 }
 impl From<&Wallet> for WalletBackup {
     fn from(wallet: &Wallet) -> Self {
@@ -106,6 +110,37 @@ impl From<&Wallet> for WalletBackup {
             wallet_birthday: (wallet.store.wallet_birthday),
             file_name: (wallet.store.file_name.clone()),
         }
+    }
+}
+impl WalletBackup {
+    /// Restore the wallet (return a walletfile)
+    pub fn restore(&self, wallet_path: &Path, rpc_config: &RPCConfig) -> Wallet {
+        let rpc = Client::try_from(rpc_config).unwrap();
+        let network = self.network;
+
+        // Generate Master key
+        let master_key = self.master_key;
+
+        // Initialise wallet
+        let file_name = wallet_path
+            .file_name()
+            .expect("file name expected")
+            .to_str()
+            .expect("expected")
+            .to_string();
+
+        let wallet_birthday = self.wallet_birthday;
+        let store = WalletStore::init(file_name, wallet_path, network, master_key, wallet_birthday)
+            .unwrap();
+
+        let mut tmp_wallet = Wallet {
+            rpc,
+            wallet_file_path: wallet_path.to_path_buf(),
+            store,
+            store_enc_material: None,
+        };
+        tmp_wallet.sync().unwrap();
+        return tmp_wallet;
     }
 }
 
@@ -287,11 +322,10 @@ impl Wallet {
         println!("Backing up to {:?}", backup_path);
 
         let backup = WalletBackup::from(self);
-        
+
         let json = serde_json::to_string_pretty(&backup).unwrap();
         let mut file = fs::File::create(backup_path).unwrap();
         file.write_all(json.as_bytes()).unwrap();
-
     }
 
     /// Load wallet data from file and connect to a core RPC.

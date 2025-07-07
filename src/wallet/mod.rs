@@ -10,6 +10,7 @@ mod split_utxos;
 mod storage;
 mod swapcoin;
 
+pub use api::WalletBackup;
 pub(crate) use api::{Balances, UTXOSpendInfo, Wallet};
 pub use error::WalletError;
 pub(crate) use fidelity::{fidelity_redeemscript, FidelityBond, FidelityError};
