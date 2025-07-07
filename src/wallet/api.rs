@@ -140,6 +140,9 @@ impl WalletBackup {
             store_enc_material: None,
         };
         tmp_wallet.sync().unwrap();
+        tmp_wallet.save_to_disk().unwrap(); //Need to save after sync. due to offer_max_size not saving.
+        //TODO check this final statements later
+        //tmp_wallet.refresh_offer_maxsize_cache().unwrap();
         return tmp_wallet;
     }
 }
