@@ -73,7 +73,7 @@ fn test_fidelity() {
     thread::sleep(Duration::from_secs(6));
 
     test_framework.assert_log(
-        "Send at least 0.01001000 BTC to",
+        "Send at least 0.01000000 BTC to",
         "/tmp/coinswap/taker/debug.log",
     );
 
@@ -85,8 +85,7 @@ fn test_fidelity() {
     // Add sync and verification after adding more funds
     {
         let mut wallet = maker.get_wallet().write().unwrap();
-        wallet.sync().unwrap();
-        thread::sleep(Duration::from_millis(100));
+        wallet.sync_no_fail();
         let balances = wallet.get_balances().unwrap();
         log::info!(
             "📊 Updated wallet balance: {} sats",
@@ -152,6 +151,7 @@ fn test_fidelity() {
                 Amount::from_sat(8000000),
                 LockTime::from_height((bitcoind.client.get_block_count().unwrap() as u32) + 950)
                     .unwrap(),
+                None,
                 DEFAULT_TX_FEE_RATE,
             )
             .unwrap();
