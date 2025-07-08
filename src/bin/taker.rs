@@ -107,8 +107,10 @@ enum Commands {
     Recover,
 
     /// Backup the wallet
-    WalletBackup,
-
+    WalletBackup {
+        #[clap(long, short = 'e')]
+        encrypt: bool,
+    },
     /// Restore the wallet
     WalletRestore {
         #[clap(long, short = 'f')]
@@ -261,13 +263,13 @@ fn main() -> Result<(), TakerError> {
         Commands::Recover => {
             taker.recover_from_swap()?;
         }
-        Commands::WalletBackup => {
+        Commands::WalletBackup{ encrypt} => {
             // Ok to work after wallet loaded
             println!("Initiating wallet backup.");
             let wallet = taker.get_wallet();
             println!("Backing up wallet: {}", wallet.get_name());
             let working_directory: PathBuf = env::current_dir().expect("Failed to get current directory");
-            wallet.backup(working_directory);
+            wallet.backup(working_directory, encrypt);
             println!("Wallet Backup Ended");
         },
         Commands::WalletRestore { file}=> {
