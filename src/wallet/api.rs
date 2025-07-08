@@ -3,15 +3,13 @@
 //! Currently, wallet synchronization is exclusively performed through RPC for makers.
 //! In the future, takers might adopt alternative synchronization methods, such as lightweight wallet solutions.
 
-use std::fs;
-use std::io::Write;
-use std::{convert::TryFrom, fmt::Display, path::PathBuf, str::FromStr};
+use std::{convert::TryFrom, fmt::Display, fs, io::Write, path::PathBuf, str::FromStr};
 
 use std::collections::HashMap;
 
 use aes_gcm::{
-    aead::{AeadCore, OsRng},
-    Aes256Gcm,
+    aead::{Aead, AeadCore, OsRng},
+    Aes256Gcm, Key, KeyInit,
 };
 
 use bip39::Mnemonic;
@@ -73,7 +71,14 @@ const PBKDF2_ITERATIONS: u32 = if cfg!(feature = "integration-test") || cfg!(tes
 } else {
     600_000
 };
-
+#[derive(Serialize, Deserialize, Debug)]
+struct EncryptedWalletBackup {
+    //TODO: merge also encryptedWalletStore, they are the same
+    /// Nonce used for AES-GCM encryption (must match during decryption).
+    nonce: Vec<u8>,
+    /// AES-GCM-encrypted CBOR-serialized `WalletBackup` data.
+    encrypted_wallet_backup: Vec<u8>,
+}
 /// Holds derived cryptographic key material used for encrypting and decrypting wallet data.
 #[derive(Debug, Clone)]
 pub struct KeyMaterial {
@@ -113,7 +118,6 @@ impl From<&Wallet> for WalletBackup {
 impl WalletBackup {
     /// Restore the wallet (return a walletfile)
     pub fn restore(&self, wallet_path: &Path, rpc_config: &RPCConfig) -> Wallet {
-
         let rpc = Client::try_from(rpc_config).unwrap();
         let network = self.network;
 
@@ -129,7 +133,8 @@ impl WalletBackup {
             .to_string();
 
         let wallet_birthday = self.wallet_birthday;
-        let store = WalletStore::init(file_name, wallet_path, network, master_key, wallet_birthday).unwrap();
+        let store = WalletStore::init(file_name, wallet_path, network, master_key, wallet_birthday)
+            .unwrap();
 
         let mut tmp_wallet = Wallet {
             rpc,
@@ -139,8 +144,8 @@ impl WalletBackup {
         };
         tmp_wallet.sync().unwrap();
         tmp_wallet.save_to_disk().unwrap(); //Need to save after sync. due to offer_max_size not saving.
-        //TODO check this final statements later
-        //tmp_wallet.refresh_offer_maxsize_cache().unwrap();
+                                            //TODO check this final statements later
+                                            //tmp_wallet.refresh_offer_maxsize_cache().unwrap();
         return tmp_wallet;
     }
 }
@@ -307,18 +312,63 @@ impl Wallet {
         return &self.store.file_name;
     }
 
-    pub fn backup(&self, path: PathBuf) {
+    pub fn backup(&self, path: PathBuf, encrypt: bool) {
         let mut backup_path = path.join(self.get_name());
         backup_path.set_extension("json");
 
         println!("Backing up to {:?}", backup_path);
-
+        let mut backup_enc_password = "".to_string();
+        if encrypt {
+            backup_enc_password = utill::prompt_password(
+                "Enter wallet backup encryption passphrase (empty for no encryption): ",
+            )
+            .unwrap();
+        }
         let backup = WalletBackup::from(self);
-        
         let json = serde_json::to_string_pretty(&backup).unwrap();
-        let mut file = fs::File::create(backup_path).unwrap();
-        file.write_all(json.as_bytes()).unwrap();
 
+        if backup_enc_password.is_empty() {
+            println!("Warning! The wallet backup file will be saved unencrypted!");
+
+            let mut file = fs::File::create(backup_path).unwrap();
+            file.write_all(json.as_bytes()).unwrap();
+        } else {
+            //TODO: Refactor into single procedure, same code as encryption mechanism
+            let derived_key = pbkdf2_hmac_array::<Sha256, 32>(
+                backup_enc_password.as_bytes(),
+                PBKDF2_SALT,
+                PBKDF2_ITERATIONS,
+            );
+
+            // Generate a fresh nonce for encrypting the backup.
+            let generated_nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+            //generated_nonce.as_slice().to_vec()
+
+            // Encryption branch: encrypt the serialized wallet before writing.
+
+            // Serialize wallet data to bytes.
+            let serialized_backup = json.as_bytes();
+
+            // Extract nonce and key for AES-GCM.
+            let material_nonce = generated_nonce.as_slice();
+            let nonce = aes_gcm::Nonce::from_slice(material_nonce);
+            let key = Key::<Aes256Gcm>::from_slice(&derived_key);
+
+            // Create AES-GCM cipher instance.
+            let cipher = Aes256Gcm::new(key);
+
+            // Encrypt the serialized wallet bytes.
+            let ciphertext = cipher.encrypt(nonce, serialized_backup.as_ref()).unwrap();
+
+            // Package encrypted data with nonce for storage.
+            let encrypted = EncryptedWalletBackup {
+                nonce: material_nonce.to_vec(),
+                encrypted_wallet_backup: ciphertext,
+            };
+            let encrypted_json = serde_json::to_string_pretty(&encrypted).unwrap();
+            let mut file = fs::File::create(backup_path).unwrap();
+            file.write_all(encrypted_json.as_bytes()).unwrap();
+        }
     }
 
     /// Load wallet data from file and connect to a core RPC.
