@@ -120,11 +120,54 @@ impl From<&Wallet> for WalletBackup {
 impl WalletBackup {
     /// Restore the wallet (return a walletfile)
     pub fn restore(wallet_path: &Path, rpc_config: &RPCConfig, file: String) -> Wallet {
-        
         let content = fs::read_to_string(&file).expect("Failed to read backup");
+
+        let wallet_backup;
+        // Try WalletBackup first
+        if let Ok(unencrypted_wallet_backup) = serde_json::from_str::<WalletBackup>(&content) {
+            wallet_backup = unencrypted_wallet_backup;
+        } else if let Ok(encrypted_wallet_backup) =
+            serde_json::from_str::<EncryptedWalletBackup>(&content)
+        {
+            println!("The backup you are trying to restore is encrypted!");
+            let backup_enc_password =
+                utill::prompt_password("Enter wallet backup encryption passphrase: ").unwrap();
+
+            if backup_enc_password.is_empty() {
+                panic!("Backup encryption password cannot be empty!");
+            }
+
+            let nonce_vec = encrypted_wallet_backup.nonce.clone();
+
+            let derived_key = pbkdf2_hmac_array::<Sha256, 32>(
+                backup_enc_password.as_bytes(),
+                PBKDF2_SALT,
+                PBKDF2_ITERATIONS,
+            );
+
+            // Reconstruct AES-GCM cipher from the provided key and stored nonce.
+            let key = Key::<Aes256Gcm>::from_slice(&derived_key);
+            let cipher = Aes256Gcm::new(key);
+            let nonce = aes_gcm::Nonce::from_slice(&nonce_vec);
+
+            // Decrypt the inner WalletBackupbytes.
+            let packed_wallet_store = cipher
+                .decrypt(
+                    nonce,
+                    encrypted_wallet_backup.encrypted_wallet_backup.as_ref(),
+                )
+                .expect("Error decrypting wallet, wrong passphrase?");
+
+            
+
+            wallet_backup =
+                serde_json::from_str(str::from_utf8(&packed_wallet_store).unwrap()).expect("Failed to deserialize wallet backup file");
+        } else {
+            panic!("Failed to deserialize wallet backup file");
+        }
+
         //println!("Backup content: {}", content);
-        let wallet_backup: WalletBackup =
-            serde_json::from_str(&content).expect("Failed to deserialize wallet backup file");
+
         //println!("Wallet_Backup: {:?}", wallet_backup);
 
         //let data_dir = data_dir.unwrap_or(get_taker_dir());
