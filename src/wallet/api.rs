@@ -117,12 +117,28 @@ impl From<&Wallet> for WalletBackup {
 }
 impl WalletBackup {
     /// Restore the wallet (return a walletfile)
-    pub fn restore(&self, wallet_path: &Path, rpc_config: &RPCConfig) -> Wallet {
-        let rpc = Client::try_from(rpc_config).unwrap();
-        let network = self.network;
+    pub fn restore(wallet_path: &Path, rpc_config: &RPCConfig, file: String) -> Wallet {
+        
+        let content = fs::read_to_string(&file).expect("Failed to read backup");
+        //println!("Backup content: {}", content);
+        let wallet_backup: WalletBackup =
+            serde_json::from_str(&content).expect("Failed to deserialize wallet backup file");
+        //println!("Wallet_Backup: {:?}", wallet_backup);
+
+        //let data_dir = data_dir.unwrap_or(get_taker_dir());
+        //let wallets_dir = data_dir.join("wallets");
+
+        // Use the provided name or default to `taker-wallet` if not specified.
+        let wallet_file_name = wallet_backup.file_name.clone();
+        //let wallet_path = wallets_dir.join(&wallet_file_name);
+        let mut rpc_config_test = rpc_config.clone();
+        rpc_config_test.wallet_name = wallet_file_name;
+
+        let rpc = Client::try_from(&rpc_config_test).unwrap();
+        let network = wallet_backup.network;
 
         // Generate Master key
-        let master_key = self.master_key;
+        let master_key = wallet_backup.master_key;
 
         // Initialise wallet
         let file_name = wallet_path
@@ -132,7 +148,7 @@ impl WalletBackup {
             .expect("expected")
             .to_string();
 
-        let wallet_birthday = self.wallet_birthday;
+        let wallet_birthday = wallet_backup.wallet_birthday;
         let store = WalletStore::init(file_name, wallet_path, network, master_key, wallet_birthday)
             .unwrap();
 
