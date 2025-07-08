@@ -111,8 +111,10 @@ enum Commands {
     Recover,
 
     /// Backup the wallet
-    WalletBackup,
-
+    WalletBackup {
+        #[clap(long, short = 'e')]
+        encrypt: bool,
+    },
     /// Restore the wallet
     WalletRestore {
         #[clap(long, short = 'f')]
@@ -263,7 +265,7 @@ fn main() -> Result<(), TakerError> {
         Commands::Recover => {
             taker.recover_from_swap()?;
         }
-        Commands::WalletBackup => {
+        Commands::WalletBackup { encrypt } => {
             // Ok to work after wallet loaded
             println!("Initiating wallet backup.");
             let wallet = taker.get_wallet();
