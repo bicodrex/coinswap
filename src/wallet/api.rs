@@ -936,7 +936,7 @@ impl Wallet {
         Ok((max_index + 1) as u32)
     }
 
-    /// Gets the next external address from the HD keychain.
+    /// Gets the next external address from the HD keychain. Saves the wallet to disk
     pub fn get_next_external_address(&mut self) -> Result<Address, WalletError> {
         let descriptors = self.get_wallet_descriptors()?;
         let receive_branch_descriptor = descriptors
