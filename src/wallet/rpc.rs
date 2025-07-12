@@ -65,7 +65,14 @@ fn list_wallet_dir(client: &Client) -> Result<Vec<String>, WalletError> {
 }
 
 impl Wallet {
-    /// Sync the wallet with the configured Bitcoin Core RPC. Save data to disk.
+
+    pub fn sync_and_save(&mut self) -> Result<(), WalletError> {
+        self.sync()?;
+        self.save_to_disk()?;
+        Ok(())
+    }
+
+    /// Sync the wallet with the configured Bitcoin Core RPC.
     pub fn sync(&mut self) -> Result<(), WalletError> {
         // Create or load the watch-only bitcoin core wallet
         let wallet_name = &self.store.file_name;
@@ -141,7 +148,6 @@ impl Wallet {
 
         let max_external_index = self.find_hd_next_index(KeychainKind::External)?;
         self.update_external_index(max_external_index);
-        self.save_to_disk()?;
         self.refresh_offer_maxsize_cache()?;
         Ok(())
     }
@@ -149,7 +155,7 @@ impl Wallet {
     /// Keep retrying sync until success and log failure.
     // This is useful to handle transient RPC errors.
     pub fn sync_no_fail(&mut self) {
-        while let Err(e) = self.sync() {
+        while let Err(e) = self.sync_and_save() {
             log::error!("Blockchain sync failed. Retrying. | {e:?}");
         }
     }
