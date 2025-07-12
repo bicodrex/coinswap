@@ -66,6 +66,10 @@ fn list_wallet_dir(client: &Client) -> Result<Vec<String>, WalletError> {
 
 impl Wallet {
 
+    /// Wrapper around [`Self::sync`] that also saves the wallet to disk.
+    ///
+    /// This method first synchronizes the wallet with the Bitcoin Core node,
+    /// then persists the state using [`Self::save_to_disk`].
     pub fn sync_and_save(&mut self) -> Result<(), WalletError> {
         self.sync()?;
         self.save_to_disk()?;
