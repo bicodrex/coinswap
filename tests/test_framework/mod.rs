@@ -405,8 +405,8 @@ pub fn fund_and_verify_maker(
         assert_eq!(wallet.get_external_index(), &utxo_count);
 
         //
-        wallet.sync().unwrap();
-
+        wallet.sync_and_save().unwrap();
+        
         let balances = wallet.get_balances().unwrap();
 
         assert_eq!(
