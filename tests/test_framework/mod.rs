@@ -406,7 +406,7 @@ pub fn fund_and_verify_maker(
 
         //
         wallet.sync_and_save().unwrap();
-        
+
         let balances = wallet.get_balances().unwrap();
 
         assert_eq!(
