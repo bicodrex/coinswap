@@ -413,7 +413,7 @@ impl Wallet {
         bond.conf_height = Some(conf_height);
 
         self.sync_and_save()?;
-        
+
         Ok(())
     }
 

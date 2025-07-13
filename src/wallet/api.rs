@@ -357,10 +357,7 @@ impl Wallet {
     }
 
     /// Update external index.
-    pub(crate) fn update_external_index(
-        &mut self,
-        new_external_index: u32,
-    ) {
+    pub(crate) fn update_external_index(&mut self, new_external_index: u32) {
         self.store.external_index = new_external_index;
     }
 
