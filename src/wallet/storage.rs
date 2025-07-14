@@ -221,7 +221,7 @@ mod tests {
             Network::Bitcoin,
             master_key,
             None,
-            &None
+            &None,
         )
         .unwrap();
 
