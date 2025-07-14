@@ -73,12 +73,14 @@ pub(crate) struct WalletStore {
 
 impl WalletStore {
     /// Initialize a store at a path (if path already exists, it will overwrite it).
+    // TODO: FIX ENCRYPTION EVEN WHEN INIT
     pub(crate) fn init(
         file_name: String,
         path: &Path,
         network: Network,
         master_key: Xpriv,
         wallet_birthday: Option<u64>,
+        store_enc_material: &Option<KeyMaterial>,
     ) -> Result<Self, WalletError> {
         let store = Self {
             file_name,
@@ -98,9 +100,9 @@ impl WalletStore {
         std::fs::create_dir_all(path.parent().expect("Path should NOT be root!"))?;
         // write: overwrites existing file.
         // create: creates new file if doesn't exist.
-        let file = File::create(path)?;
-        let writer = BufWriter::new(file);
-        serde_cbor::to_writer(writer, &store)?;
+        File::create(path)?;
+
+        store.write_to_disk(path, store_enc_material).unwrap();
 
         Ok(store)
     }
@@ -219,6 +221,7 @@ mod tests {
             Network::Bitcoin,
             master_key,
             None,
+            &None
         )
         .unwrap();
 
