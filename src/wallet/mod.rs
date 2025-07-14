@@ -12,7 +12,7 @@ mod swapcoin;
 
 pub use api::WalletBackup;
 pub use api::Balances;
-pub(crate) use api::{UTXOSpendInfo, Wallet};
+pub(crate) use api::{UTXOSpendInfo};
 pub use error::WalletError;
 pub(crate) use fidelity::{fidelity_redeemscript, FidelityBond, FidelityError};
 pub use rpc::RPCConfig;

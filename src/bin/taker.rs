@@ -118,7 +118,7 @@ enum Commands {
     /// Restore the wallet
     WalletRestore {
         #[clap(long, short = 'f')]
-        file: String,
+        backup_file: String,
     },
 }
 
@@ -275,26 +275,18 @@ fn main() -> Result<(), TakerError> {
             wallet.backup(working_directory);
             println!("Wallet Backup Ended");
         }
-        Commands::WalletRestore { file } => {
+        Commands::WalletRestore { backup_file } => {
             // Does it need to run before taker::init?
-            println!("Initiating wallet restore, from backup: {}", file);
-            let content = fs::read_to_string(&file).expect("Failed to read backup");
-            //println!("Backup content: {}", content);
-            let wallet_backup: WalletBackup =
-                serde_json::from_str(&content).expect("Failed to deserialize wallet backup file");
-            //println!("Wallet_Backup: {:?}", wallet_backup);
+            println!("Initiating wallet restore, from backup: {}", backup_file);
 
-            //let data_dir = data_dir.unwrap_or(get_taker_dir());
-            //let wallets_dir = data_dir.join("wallets");
+            let file = PathBuf::from(backup_file);
 
-            // Use the provided name or default to `taker-wallet` if not specified.
-            let wallet_file_name = wallet_backup.file_name.clone();
-            //let wallet_path = wallets_dir.join(&wallet_file_name);
-            let mut rpc_config_test = rpc_config.clone();
-            rpc_config_test.wallet_name = wallet_file_name;
-
-            let restored_wallet =
-                wallet_backup.restore(Path::new("./taker-wallet"), &rpc_config_test);
+            let restored_wallet = WalletBackup::restore(
+                Path::new("./taker-wallet"),
+                &rpc_config,
+                &file,
+                "taker-wallet".to_string(),
+            );
 
             println!(
                 "Wallet Restore Ended, this is the wallet: {:?}",
