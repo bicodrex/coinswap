@@ -119,10 +119,17 @@ impl From<&Wallet> for WalletBackup {
 }
 impl WalletBackup {
     /// Restore the wallet (return a walletfile)
-    pub fn restore(wallet_path: &Path, rpc_config: &RPCConfig, backup_file: &PathBuf, restore_name: String) -> Wallet {
+    pub fn restore(
+        wallet_path: &Path,
+        rpc_config: &RPCConfig,
+        backup_file: &PathBuf,
+        restore_name: String,
+        backup_enc_material: Option<KeyMaterial>,
+        restored_enc_material: Option<KeyMaterial>
+    ) -> Wallet {
         let mut backup_file_with_ext = backup_file.clone();
         backup_file_with_ext.set_extension("json");
-        
+
         let content = fs::read_to_string(&backup_file_with_ext).expect("Failed to read backup");
 
         let wallet_backup;
@@ -132,26 +139,12 @@ impl WalletBackup {
         } else if let Ok(encrypted_wallet_backup) =
             serde_json::from_str::<EncryptedWalletBackup>(&content)
         {
-            println!("The backup you are trying to restore is encrypted!");
-            let backup_enc_password =
-                utill::prompt_password("Enter wallet backup encryption passphrase: ").unwrap();
-
-            if backup_enc_password.is_empty() {
-                panic!("Backup encryption password cannot be empty!");
-            }
-
-            let nonce_vec = encrypted_wallet_backup.nonce.clone();
-
-            let derived_key = pbkdf2_hmac_array::<Sha256, 32>(
-                backup_enc_password.as_bytes(),
-                PBKDF2_SALT,
-                PBKDF2_ITERATIONS,
-            );
+            let derived_key = backup_enc_material.unwrap().key;
 
             // Reconstruct AES-GCM cipher from the provided key and stored nonce.
             let key = Key::<Aes256Gcm>::from_slice(&derived_key);
             let cipher = Aes256Gcm::new(key);
-            let nonce = aes_gcm::Nonce::from_slice(&nonce_vec);
+            let nonce = aes_gcm::Nonce::from_slice(&encrypted_wallet_backup.nonce);
 
             // Decrypt the inner WalletBackupbytes.
             let packed_wallet_store = cipher
@@ -161,10 +154,8 @@ impl WalletBackup {
                 )
                 .expect("Error decrypting wallet, wrong passphrase?");
 
-            
-
-            wallet_backup =
-                serde_json::from_str(str::from_utf8(&packed_wallet_store).unwrap()).expect("Failed to deserialize wallet backup file");
+            wallet_backup = serde_json::from_str(str::from_utf8(&packed_wallet_store).unwrap())
+                .expect("Failed to deserialize wallet backup file");
         } else {
             panic!("Failed to deserialize wallet backup file");
         }
@@ -177,11 +168,10 @@ impl WalletBackup {
         //let wallets_dir = data_dir.join("wallets");
 
         // Use the provided name or default to `taker-wallet` if not specified.
-        
-        
+
         //let wallet_file_name = wallet_backup.file_name.clone();
         let wallet_file_name = restore_name;
-        
+
         //let wallet_path = wallets_dir.join(&wallet_file_name);
         let mut rpc_config_test = rpc_config.clone();
         rpc_config_test.wallet_name = wallet_file_name;
@@ -189,7 +179,6 @@ impl WalletBackup {
         let rpc = Client::try_from(&rpc_config_test).unwrap();
         let network = wallet_backup.network;
 
-        // Generate Master key
         let master_key = wallet_backup.master_key;
 
         // Initialise wallet
@@ -201,14 +190,21 @@ impl WalletBackup {
             .to_string();
 
         let wallet_birthday = wallet_backup.wallet_birthday;
-        let store = WalletStore::init(file_name, wallet_path, network, master_key, wallet_birthday)
-            .unwrap();
+        let store = WalletStore::init(
+            file_name,
+            wallet_path,
+            network,
+            master_key,
+            wallet_birthday,
+            &restored_enc_material,
+        )
+        .unwrap();
 
         let mut tmp_wallet = Wallet {
             rpc,
             wallet_file_path: wallet_path.to_path_buf(),
             store,
-            store_enc_material: None,
+            store_enc_material: restored_enc_material,
         };
         tmp_wallet.sync().unwrap();
         tmp_wallet.save_to_disk().unwrap(); //Need to save after sync. due to offer_max_size not saving.
@@ -414,63 +410,52 @@ impl Wallet {
     }
 
     /// Backup the wallet
-    pub fn backup(&self, path: &PathBuf, encrypt: bool) {
+    pub fn backup(&self, path: &PathBuf, backup_enc_material: Option<KeyMaterial>) {
         let mut backup_path = path.join("");
         backup_path.set_extension("json");
 
         println!("Backing up to {:?}", backup_path);
-        let mut backup_enc_password = "".to_string();
-        if encrypt {
-            backup_enc_password = utill::prompt_password(
-                "Enter wallet backup encryption passphrase (empty for no encryption): ",
-            )
-            .unwrap();
-        }
+
         let backup = WalletBackup::from(self);
 
         let json = serde_json::to_string_pretty(&backup).unwrap();
 
-        if backup_enc_password.is_empty() {
-            println!("Warning! The wallet backup file will be saved unencrypted!");
+        match backup_enc_material {
+            Some(key_material) => {
+                //TODO: Refactor into single procedure, same code as encryption mechanism
 
-            let mut file = fs::File::create(backup_path).unwrap();
-            file.write_all(json.as_bytes()).unwrap();
-        } else {
-            //TODO: Refactor into single procedure, same code as encryption mechanism
-            let derived_key = pbkdf2_hmac_array::<Sha256, 32>(
-                backup_enc_password.as_bytes(),
-                PBKDF2_SALT,
-                PBKDF2_ITERATIONS,
-            );
+                //generated_nonce.as_slice().to_vec()
 
-            // Generate a fresh nonce for encrypting the backup.
-            let generated_nonce = Aes256Gcm::generate_nonce(&mut OsRng);
-            //generated_nonce.as_slice().to_vec()
+                // Encryption branch: encrypt the serialized wallet before writing.
 
-            // Encryption branch: encrypt the serialized wallet before writing.
+                // Serialize wallet data to bytes.
+                let serialized_backup = json.as_bytes();
 
-            // Serialize wallet data to bytes.
-            let serialized_backup = json.as_bytes();
+                // Extract nonce and key for AES-GCM.
+                let material_nonce = key_material.nonce.clone().unwrap();
+                let nonce = aes_gcm::Nonce::from_slice(&material_nonce);
+                let key = Key::<Aes256Gcm>::from_slice(&key_material.key);
 
-            // Extract nonce and key for AES-GCM.
-            let material_nonce = generated_nonce.as_slice();
-            let nonce = aes_gcm::Nonce::from_slice(material_nonce);
-            let key = Key::<Aes256Gcm>::from_slice(&derived_key);
+                // Create AES-GCM cipher instance.
+                let cipher = Aes256Gcm::new(key);
 
-            // Create AES-GCM cipher instance.
-            let cipher = Aes256Gcm::new(key);
+                // Encrypt the serialized wallet bytes.
+                let ciphertext = cipher.encrypt(nonce, serialized_backup.as_ref()).unwrap();
 
-            // Encrypt the serialized wallet bytes.
-            let ciphertext = cipher.encrypt(nonce, serialized_backup.as_ref()).unwrap();
-
-            // Package encrypted data with nonce for storage.
-            let encrypted = EncryptedWalletBackup {
-                nonce: material_nonce.to_vec(),
-                encrypted_wallet_backup: ciphertext,
-            };
-            let encrypted_json = serde_json::to_string_pretty(&encrypted).unwrap();
-            let mut file = fs::File::create(backup_path).unwrap();
-            file.write_all(encrypted_json.as_bytes()).unwrap();
+                // Package encrypted data with nonce for storage.
+                let encrypted = EncryptedWalletBackup {
+                    nonce: material_nonce,
+                    encrypted_wallet_backup: ciphertext,
+                };
+                let encrypted_json = serde_json::to_string_pretty(&encrypted).unwrap();
+                let mut file = fs::File::create(backup_path).unwrap();
+                file.write_all(encrypted_json.as_bytes()).unwrap();
+            }
+            None => {
+                println!("Warning! The wallet backup file will be saved unencrypted!");
+                let mut file = fs::File::create(backup_path).unwrap();
+                file.write_all(json.as_bytes()).unwrap();
+            }
         }
     }
 
@@ -546,9 +531,6 @@ impl Wallet {
             prompt_password("Enter wallet encryption passphrase (empty for no encryption): ")?
         };
 
-
-
-
         // If user entered empty password, no encryption key material is created.
         let key = if wallet_enc_password.is_empty() {
             None
@@ -601,7 +583,7 @@ impl Wallet {
     }
 
     /// Update the existing file. Error if path does not exist.
-    pub(crate) fn save_to_disk(&self) -> Result<(), WalletError> {
+    pub fn save_to_disk(&self) -> Result<(), WalletError> {
         self.store
             .write_to_disk(&self.wallet_file_path, &self.store_enc_material)
     }
