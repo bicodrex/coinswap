@@ -73,7 +73,6 @@ pub(crate) struct WalletStore {
 
 impl WalletStore {
     /// Initialize a store at a path (if path already exists, it will overwrite it).
-    // TODO: FIX ENCRYPTION EVEN WHEN INIT
     pub(crate) fn init(
         file_name: String,
         path: &Path,
