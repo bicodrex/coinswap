@@ -10,6 +10,8 @@ mod split_utxos;
 mod storage;
 mod swapcoin;
 
+pub use api::KeyMaterial;
+pub use api::Wallet;
 pub use api::WalletBackup;
 pub(crate) use api::{Balances, UTXOSpendInfo};
 pub use error::WalletError;
