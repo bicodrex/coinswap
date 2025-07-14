@@ -269,7 +269,7 @@ fn main() -> Result<(), TakerError> {
             let wallet = taker.get_wallet();
             println!("Backing up wallet: {}", wallet.get_name());
             let working_directory: PathBuf = env::current_dir().expect("Failed to get current directory");
-            wallet.backup(&working_directory, encrypt);
+            wallet.backup(&working_directory, None);
             println!("Wallet Backup Ended");
         },
         Commands::WalletRestore { backup_file}=> {
@@ -278,7 +278,7 @@ fn main() -> Result<(), TakerError> {
 
             let file = PathBuf::from(backup_file);
 
-            let restored_wallet = WalletBackup::restore(Path::new("./taker-wallet"), &rpc_config, &file, "taker-wallet".to_string());
+            let restored_wallet = WalletBackup::restore(Path::new("./taker-wallet"), &rpc_config, &file, "taker-wallet".to_string(), None, None);
 
 
 
