@@ -7,7 +7,6 @@
 //! for communication between taker and maker.
 
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
 use socks::Socks5Stream;
 use std::{net::TcpStream, thread::sleep, time::Duration};
 
@@ -44,21 +43,6 @@ use crate::taker::api::{
 };
 
 use crate::wallet::SwapCoin;
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub(crate) struct ContractTransaction {
-    pub(crate) tx: Transaction,
-    pub(crate) redeemscript: ScriptBuf,
-    pub(crate) hashlock_spend_without_preimage: Option<Transaction>,
-    pub(crate) timelock_spend: Option<Transaction>,
-    pub(crate) timelock_spend_broadcasted: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub(crate) struct ContractsInfo {
-    pub(crate) contract_txes: Vec<ContractTransaction>,
-    pub(crate) wallet_label: String,
-}
 
 /// Make a handshake with a maker.
 /// Ensures that the Maker is alive and responding.
