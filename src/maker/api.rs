@@ -14,7 +14,7 @@ use crate::{
     },
     utill::{
         check_tor_status, get_maker_dir, redeemscript_to_scriptpubkey, ConnectionType,
-        DEFAULT_TX_FEE_RATE, HEART_BEAT_INTERVAL, REQUIRED_CONFIRMS,
+        HEART_BEAT_INTERVAL, MIN_FEE_RATE, REQUIRED_CONFIRMS,
     },
     wallet::{RPCConfig, SwapCoin, WalletSwapCoin},
 };
@@ -348,7 +348,7 @@ impl Maker {
                 .store
                 .fidelity_bond
                 .iter()
-                .filter_map(|(i, (bond, _))| {
+                .filter_map(|(i, bond)| {
                     if bond.conf_height.is_none() && bond.cert_expiry.is_none() {
                         let conf_height = wallet_read
                             .wait_for_fidelity_tx_confirmation(bond.outpoint.txid)
@@ -577,7 +577,7 @@ pub(crate) fn check_for_broadcasted_contracts(maker: Arc<Maker>) -> Result<(), M
                             let time_lock_spend = maker.wallet.read()?.create_timelock_spend(
                                 og_sc,
                                 next_internal_address,
-                                DEFAULT_TX_FEE_RATE,
+                                MIN_FEE_RATE,
                             )?;
                             // Sometimes we might not have other's contract signatures.
                             // This means the protocol has been stopped abruptly.
@@ -657,7 +657,7 @@ pub(crate) fn restore_broadcasted_contracts_on_reboot(
         let time_lock_spend = maker.wallet.read()?.create_timelock_spend(
             og_sc,
             next_internal_address,
-            DEFAULT_TX_FEE_RATE,
+            MIN_FEE_RATE,
         )?;
 
         let tx = match og_sc.get_fully_signed_contract_tx() {
@@ -758,7 +758,7 @@ pub(crate) fn check_for_idle_states(maker: Arc<Maker>) -> Result<(), MakerError>
                         let time_lock_spend = maker.wallet.read()?.create_timelock_spend(
                             og_sc,
                             next_internal_address,
-                            DEFAULT_TX_FEE_RATE,
+                            MIN_FEE_RATE,
                         )?;
                         outgoings.push((
                             (og_sc.get_multisig_redeemscript(), contract),

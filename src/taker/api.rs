@@ -33,7 +33,7 @@ use bitcoin::{
 
 use super::{
     error::TakerError,
-    offers::{fetch_addresses_from_dns, fetch_offer_from_makers, MakerAddress, OfferAndAddress},
+    offers::{fetch_offer_from_makers, MakerAddress, OfferAndAddress},
     routines::*,
 };
 use crate::{
@@ -46,13 +46,19 @@ use crate::{
             TakerToMakerMessage,
         },
     },
-    taker::{config::TakerConfig, offers::OfferBook},
+    taker::{config::TakerConfig, offers::OfferBook, send_message_with_prefix},
     utill::*,
     wallet::{
         IncomingSwapCoin, OutgoingSwapCoin, RPCConfig, SwapCoin, Wallet, WalletError,
         WalletSwapCoin, WatchOnlySwapCoin,
     },
 };
+
+#[cfg(not(feature = "tracker"))]
+use crate::taker::offers::fetch_addresses_from_dns;
+
+#[cfg(feature = "tracker")]
+use crate::taker::offers::fetch_addresses_from_tracker;
 
 // Default values for Taker configurations
 pub(crate) const REFUND_LOCKTIME: u16 = 20;
@@ -70,12 +76,6 @@ pub(crate) const RECONNECT_SHORT_SLEEP_DELAY: u64 = 1;
 pub(crate) const RECONNECT_LONG_SLEEP_DELAY: u64 = 5;
 pub(crate) const SHORT_LONG_SLEEP_DELAY_TRANSITION: u32 = 30;
 pub(crate) const TCP_TIMEOUT_SECONDS: u64 = 300;
-#[cfg(feature = "integration-test")]
-pub(crate) const MINER_FEE: u64 = 1000;
-
-/// This fee is used for both funding and contract txs.
-#[cfg(not(feature = "integration-test"))]
-pub(crate) const MINER_FEE: u64 = 300; // around 2 sats/vb for funding tx
 
 /// Swap specific parameters. These are user's policy and can differ among swaps.
 /// SwapParams govern the criteria to find suitable set of makers from the offerbook.
@@ -306,8 +306,9 @@ impl Taker {
         self.ongoing_swap_state.swap_params = swap_params;
         // Check if we have enough balance.
         let available = self.wallet.get_balances()?.spendable;
+        let estimated_fee = Amount::from_sat(calculate_fee_sats(200));
 
-        let required = swap_params.send_amount + Amount::from_sat(1000);
+        let required = swap_params.send_amount + estimated_fee;
         if available < required {
             let err = WalletError::InsufficientFund {
                 available: available.to_sat(),
@@ -507,7 +508,7 @@ impl Taker {
                     &hashlock_pubkeys,
                     self.get_preimage_hash(),
                     swap_locktime,
-                    Amount::from_sat(MINER_FEE),
+                    MIN_FEE_RATE,
                 )?;
 
             let contract_reedemscripts = outgoing_swapcoins
@@ -1148,7 +1149,7 @@ impl Taker {
             this_maker.address
         );
         let id = self.ongoing_swap_state.id.clone();
-        send_message(
+        send_message_with_prefix(
             &mut socket,
             &TakerToMakerMessage::RespContractSigsForRecvrAndSender(
                 ContractSigsForRecvrAndSender {
@@ -1253,7 +1254,6 @@ impl Taker {
                         previous_funding_output,
                         maker_funding_tx_value,
                         next_contract_redeemscript,
-                        Amount::from_sat(MINER_FEE),
                     )
                 },
             )
@@ -1722,7 +1722,7 @@ impl Taker {
             ret
         })?;
         log::info!("===> PrivateKeyHandover | {maker_address}");
-        send_message(
+        send_message_with_prefix(
             &mut socket,
             &TakerToMakerMessage::RespPrivKeyHandover(PrivKeyHandover {
                 multisig_privkeys: privkeys_reply,
@@ -1908,7 +1908,7 @@ impl Taker {
 
             let timelock_spend =
                 self.wallet
-                    .create_timelock_spend(&outgoing, next_internal, DEFAULT_TX_FEE_RATE)?;
+                    .create_timelock_spend(&outgoing, next_internal, MIN_FEE_RATE)?;
             outgoing_infos.push(((reedemscript, contract_tx), (timelock, timelock_spend)));
         }
 
@@ -2023,8 +2023,19 @@ impl Taker {
 
         log::info!("Fetching addresses from DNS: {dns_addr}");
 
+        #[cfg(not(feature = "tracker"))]
         let addresses_from_dns =
             match fetch_addresses_from_dns(socks_port, dns_addr, self.config.connection_type) {
+                Ok(dns_addrs) => dns_addrs,
+                Err(e) => {
+                    log::error!("Could not connect to DNS Server: {e:?}");
+                    return Err(e);
+                }
+            };
+
+        #[cfg(feature = "tracker")]
+        let addresses_from_dns =
+            match fetch_addresses_from_tracker(socks_port, dns_addr, self.config.connection_type) {
                 Ok(dns_addrs) => dns_addrs,
                 Err(e) => {
                     log::error!("Could not connect to DNS Server: {e:?}");
@@ -2105,7 +2116,7 @@ impl Taker {
 
         socket.set_write_timeout(Some(reconnect_timeout))?;
 
-        send_message(&mut socket, &msg)?;
+        send_message_with_prefix(&mut socket, &msg)?;
         log::info!("===> {msg} | {maker_addr}");
 
         Ok(())

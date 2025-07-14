@@ -4,7 +4,7 @@ use bitcoind::bitcoincore_rpc::RpcApi;
 use coinswap::{
     maker::{start_maker_server, MakerBehavior},
     taker::TakerBehavior,
-    utill::{ConnectionType, DEFAULT_TX_FEE_RATE},
+    utill::{ConnectionType, MIN_FEE_RATE},
 };
 mod test_framework;
 use test_framework::*;
@@ -73,7 +73,7 @@ fn test_fidelity() {
     thread::sleep(Duration::from_secs(6));
 
     test_framework.assert_log(
-        "Send at least 0.01001000 BTC to",
+        "Send at least 0.01000000 BTC to",
         "/tmp/coinswap/taker/debug.log",
     );
 
@@ -85,7 +85,7 @@ fn test_fidelity() {
     // Add sync and verification after adding more funds
     {
         let mut wallet = maker.get_wallet().write().unwrap();
-        wallet.sync().unwrap();
+        wallet.sync_no_fail();
         let balances = wallet.get_balances().unwrap();
         log::info!(
             "📊 Updated wallet balance: {} sats",
@@ -115,21 +115,19 @@ fn test_fidelity() {
         let highest_bond_index = wallet_read.get_highest_fidelity_index().unwrap().unwrap();
         assert_eq!(highest_bond_index, 0);
 
-        let (bond, _) = wallet_read
+        let bond = wallet_read
             .get_fidelity_bonds()
             .get(&highest_bond_index)
             .unwrap();
         let bond_value = wallet_read.calculate_bond_value(bond).unwrap();
         assert_eq!(bond_value, Amount::from_sat(10814));
 
-        let (bond, redeemed) = wallet_read
+        let bond = wallet_read
             .get_fidelity_bonds()
             .get(&highest_bond_index)
             .unwrap();
-
         assert_eq!(bond.amount, Amount::from_sat(5000000));
-        assert!(!redeemed);
-
+        assert!(!bond.is_spent());
         // Log the bond details for debugging
         log::info!(
             "📊 First bond created - Amount: {}, Value: {}, Maturity Height: {}",
@@ -153,7 +151,8 @@ fn test_fidelity() {
                 Amount::from_sat(8000000),
                 LockTime::from_height((bitcoind.client.get_block_count().unwrap() as u32) + 950)
                     .unwrap(),
-                DEFAULT_TX_FEE_RATE,
+                None,
+                MIN_FEE_RATE,
             )
             .unwrap();
 
@@ -164,9 +163,9 @@ fn test_fidelity() {
         let highest_bond_index = wallet_read.get_highest_fidelity_index().unwrap().unwrap();
         assert_eq!(highest_bond_index, index);
 
-        let (bond, redeemed) = wallet_read.get_fidelity_bonds().get(&index).unwrap();
+        let bond = wallet_read.get_fidelity_bonds().get(&index).unwrap();
         assert_eq!(bond.amount, Amount::from_sat(8000000));
-        assert!(!redeemed);
+        (assert!(!bond.is_spent()));
 
         bond.lock_time.to_consensus_u32()
     };
@@ -179,7 +178,7 @@ fn test_fidelity() {
         let balances = wallet_read.get_balances().unwrap();
 
         assert_eq!(balances.fidelity.to_sat(), 13000000);
-        assert_eq!(balances.regular.to_sat(), 90998000);
+        assert_eq!(balances.regular.to_sat(), 90999206);
     }
 
     log::info!("⏳ Waiting for fidelity bonds to mature and testing redemption");
@@ -200,9 +199,7 @@ fn test_fidelity() {
             if required_height == first_maturity_height {
                 log::info!("🔓 First Fidelity Bond is matured. Sending redemption transaction");
 
-                wallet_write
-                    .redeem_fidelity(0, DEFAULT_TX_FEE_RATE)
-                    .unwrap();
+                wallet_write.redeem_fidelity(0, MIN_FEE_RATE).unwrap();
 
                 log::info!("✅ First Fidelity Bond is successfully redeemed");
 
@@ -216,9 +213,7 @@ fn test_fidelity() {
             } else {
                 log::info!("🔓 Second Fidelity Bond is matured. Sending redemption transaction");
 
-                wallet_write
-                    .redeem_fidelity(1, DEFAULT_TX_FEE_RATE)
-                    .unwrap();
+                wallet_write.redeem_fidelity(1, MIN_FEE_RATE).unwrap();
 
                 log::info!("✅ Second Fidelity Bond is successfully redeemed");
 
@@ -252,7 +247,7 @@ fn test_fidelity() {
         let balances = wallet_read.get_balances().unwrap();
 
         assert_eq!(balances.fidelity.to_sat(), 0);
-        assert_eq!(balances.regular.to_sat(), 103996000);
+        assert_eq!(balances.regular.to_sat(), 103998762);
     }
 
     // Stop the directory server.
