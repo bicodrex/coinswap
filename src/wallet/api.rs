@@ -117,8 +117,11 @@ impl From<&Wallet> for WalletBackup {
 }
 impl WalletBackup {
     /// Restore the wallet (return a walletfile)
-    pub fn restore(wallet_path: &Path, rpc_config: &RPCConfig, file: String) -> Wallet {
-        let content = fs::read_to_string(&file).expect("Failed to read backup");
+    pub fn restore(wallet_path: &Path, rpc_config: &RPCConfig, backup_file: &PathBuf, restore_name: String) -> Wallet {
+        let mut backup_file_with_ext = backup_file.clone();
+        backup_file_with_ext.set_extension("json");
+        
+        let content = fs::read_to_string(&backup_file_with_ext).expect("Failed to read backup");
 
         let wallet_backup;
         // Try WalletBackup first
@@ -172,7 +175,11 @@ impl WalletBackup {
         //let wallets_dir = data_dir.join("wallets");
 
         // Use the provided name or default to `taker-wallet` if not specified.
-        let wallet_file_name = wallet_backup.file_name.clone();
+        
+        
+        //let wallet_file_name = wallet_backup.file_name.clone();
+        let wallet_file_name = restore_name;
+        
         //let wallet_path = wallets_dir.join(&wallet_file_name);
         let mut rpc_config_test = rpc_config.clone();
         rpc_config_test.wallet_name = wallet_file_name;
@@ -219,6 +226,23 @@ pub struct Wallet {
     /// If present, wallet data will be encrypted/decrypted using AES-GCM.
     /// The original passphrase is never stored—only the derived key is kept in memory.
     store_enc_material: Option<KeyMaterial>,
+}
+impl PartialEq for Wallet {
+    fn eq(&self, other: &Self) -> bool {
+        //self.store == other.store
+        //avoided filename
+        self.store.network == other.store.network &&
+        self.store.master_key == other.store.master_key &&
+        self.store.external_index == other.store.external_index &&
+        self.store.offer_maxsize == other.store.offer_maxsize &&
+        //avoided incoming_swapcoins
+        //avoided outgoing_swapcoins
+        //avoided prevout_to_contract_map
+        self.store.fidelity_bond == other.store.fidelity_bond &&
+        //avoided last_synced_height
+        self.store.wallet_birthday == other.store.wallet_birthday &&
+        self.store.utxo_cache == other.store.utxo_cache
+    }
 }
 
 /// Specify the keychain derivation path from [`HARDENDED_DERIVATION`]
@@ -366,13 +390,14 @@ impl Wallet {
             store_enc_material,
         })
     }
-
+    /// Get the name
     pub fn get_name(&self) -> &str {
         return &self.store.file_name;
     }
 
-    pub fn backup(&self, path: PathBuf, encrypt: bool) {
-        let mut backup_path = path.join(self.get_name());
+    /// Backup the wallet
+    pub fn backup(&self, path: &PathBuf, encrypt: bool) {
+        let mut backup_path = path.join("");
         backup_path.set_extension("json");
 
         println!("Backing up to {:?}", backup_path);
@@ -494,6 +519,7 @@ impl Wallet {
         path: &Path,
         rpc_config: &RPCConfig,
     ) -> Result<Wallet, WalletError> {
+        //TODO: Check if wallet is unencrypted, and avoid asking passphrase, like in WalletBackup::restore, we can also remote the integration-test hardcoded password and create an unencrypted wallet
         // For tests or integration tests, use a fixed password. Otherwise prompt user.
         let wallet_enc_password = if cfg!(feature = "integration-test") || cfg!(test) {
             "integration-test".to_string()
@@ -502,6 +528,9 @@ impl Wallet {
                 "Enter wallet encryption passphrase (empty for no encryption): ",
             )?
         };
+
+
+
 
         // If user entered empty password, no encryption key material is created.
         let key = if wallet_enc_password.is_empty() {
@@ -985,7 +1014,7 @@ impl Wallet {
         Ok(filtered_utxos)
     }
 
-    pub fn list_live_hashlock_contract_spend_info(
+    pub(crate) fn list_live_hashlock_contract_spend_info(
         &self,
     ) -> Result<Vec<(ListUnspentResultEntry, UTXOSpendInfo)>, WalletError> {
         let all_valid_utxo = self.list_all_utxo_spend_info()?;

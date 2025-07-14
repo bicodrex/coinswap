@@ -114,7 +114,7 @@ enum Commands {
     /// Restore the wallet
     WalletRestore {
         #[clap(long, short = 'f')]
-        file: String,
+        backup_file: String,
     },
 }
 
@@ -269,15 +269,16 @@ fn main() -> Result<(), TakerError> {
             let wallet = taker.get_wallet();
             println!("Backing up wallet: {}", wallet.get_name());
             let working_directory: PathBuf = env::current_dir().expect("Failed to get current directory");
-            wallet.backup(working_directory, encrypt);
+            wallet.backup(&working_directory, encrypt);
             println!("Wallet Backup Ended");
         },
-        Commands::WalletRestore { file}=> {
+        Commands::WalletRestore { backup_file}=> {
             // Does it need to run before taker::init?
-            println!("Initiating wallet restore, from backup: {}", file);
+            println!("Initiating wallet restore, from backup: {}", backup_file);
 
+            let file = PathBuf::from(backup_file);
 
-            let restored_wallet = WalletBackup::restore(Path::new("./taker-wallet"), &rpc_config, file);
+            let restored_wallet = WalletBackup::restore(Path::new("./taker-wallet"), &rpc_config, &file, "taker-wallet".to_string());
 
 
 
