@@ -313,7 +313,6 @@ impl Wallet {
         let network = rpc.get_blockchain_info()?.chain;
 
         // Check if the backend node is running on correct network. Or else hard error.
-
         if store.network != network {
             log::error!(
                 "Wallet file is created for {}, backend Bitcoin Core is running on {}",
