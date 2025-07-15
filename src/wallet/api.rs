@@ -74,12 +74,13 @@ const PBKDF2_ITERATIONS: u32 = if cfg!(feature = "integration-test") || cfg!(tes
     600_000
 };
 #[derive(Serialize, Deserialize, Debug)]
-struct EncryptedWalletBackup {
+/// Encrypted wallet backup
+pub struct EncryptedWalletBackup {
     //TODO: merge also encryptedWalletStore, they are the same
     /// Nonce used for AES-GCM encryption (must match during decryption).
-    nonce: Vec<u8>,
+    pub nonce: Vec<u8>,
     /// AES-GCM-encrypted CBOR-serialized `WalletBackup` data.
-    encrypted_wallet_backup: Vec<u8>,
+    pub encrypted_wallet_backup: Vec<u8>,
 }
 /// Holds derived cryptographic key material used for encrypting and decrypting wallet data.
 #[derive(Debug, Clone)]

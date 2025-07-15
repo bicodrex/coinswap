@@ -1,12 +1,14 @@
+use aes_gcm::{aead::OsRng, AeadCore, Aes256Gcm};
 use bitcoin::{Address, Amount};
 use bitcoind::bitcoincore_rpc::Auth;
 use clap::Parser;
 use coinswap::{
     taker::{error::TakerError, SwapParams, Taker, TakerBehavior},
-    utill::{parse_proxy_auth, setup_taker_logger, ConnectionType, MIN_FEE_RATE, UTXO},
-    wallet::{Destination, RPCConfig, WalletBackup},
+    utill::{self, parse_proxy_auth, setup_taker_logger, ConnectionType, MIN_FEE_RATE, UTXO},
+    wallet::{Destination, EncryptedWalletBackup, KeyMaterial, RPCConfig, WalletBackup},
 };
 use log::LevelFilter;
+use pbkdf2::pbkdf2_hmac_array;
 use serde_json::{json, to_string_pretty};
 use std::{
     env, fs,
@@ -268,6 +270,7 @@ fn main() -> Result<(), TakerError> {
         Commands::WalletBackup { encrypt } => {
             // Ok to work after wallet loaded
             println!("Initiating wallet backup.");
+
             let wallet = taker.get_wallet();
             println!("Backing up wallet: {}", wallet.get_name());
             let working_directory: PathBuf =
