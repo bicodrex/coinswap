@@ -1,14 +1,38 @@
+use aes_gcm::{aead::OsRng, AeadCore, Aes256Gcm};
 use bitcoin::{Address, Amount};
 use bitcoind::bitcoincore_rpc::Auth;
 use clap::Parser;
 use coinswap::{
     taker::{error::TakerError, SwapParams, Taker, TakerBehavior},
-    utill::{parse_proxy_auth, setup_taker_logger, ConnectionType, DEFAULT_TX_FEE_RATE, UTXO},
-    wallet::{Destination, RPCConfig, WalletBackup},
+    utill::{
+        self, parse_proxy_auth, setup_taker_logger, ConnectionType, DEFAULT_TX_FEE_RATE, UTXO,
+    },
+    wallet::{Destination, EncryptedWalletBackup, KeyMaterial, RPCConfig, WalletBackup},
 };
 use log::LevelFilter;
+use pbkdf2::pbkdf2_hmac_array;
 use serde_json::{json, to_string_pretty};
-use std::{env, fs, path::{Path, PathBuf}, str::FromStr};
+use sha2::Sha256;
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    str::FromStr,
+};
+/// Salt used for key derivation from a user-provided passphrase.
+const PBKDF2_SALT: &[u8; 8] = b"coinswap";
+/// Number of PBKDF2 iterations to strengthen passphrase-derived keys.
+///
+/// In production, this is set to **600,000 iterations**, following
+/// modern password security guidance from the
+/// [OWASP Password Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html).
+///
+/// During testing or integration tests, the iteration count is reduced to 1
+/// for performance.
+const PBKDF2_ITERATIONS: u32 = if cfg!(feature = "integration-test") || cfg!(test) {
+    1
+} else {
+    600_000
+};
 /// A simple command line app to operate as coinswap client.
 ///
 /// The app works as a regular Bitcoin wallet with the added capability to perform coinswaps. The app
@@ -263,27 +287,112 @@ fn main() -> Result<(), TakerError> {
         Commands::Recover => {
             taker.recover_from_swap()?;
         }
-        Commands::WalletBackup{ encrypt} => {
+        Commands::WalletBackup { encrypt } => {
             // Ok to work after wallet loaded
             println!("Initiating wallet backup.");
+
             let wallet = taker.get_wallet();
-            println!("Backing up wallet: {}", wallet.get_name());
-            let working_directory: PathBuf = env::current_dir().expect("Failed to get current directory");
-            wallet.backup(&working_directory, None);
+            let backup_name = format!("{}-backup", wallet.get_name());
+            println!(
+                "Backing up wallet: {} to {}",
+                wallet.get_name(),
+                backup_name
+            );
+            let working_directory: PathBuf =
+                env::current_dir().expect("Failed to get current directory");
+
+            let backup_enc_material = if encrypt {
+                let backup_enc_password = utill::prompt_password(
+                    "Enter restored walled encryption passphrase(empty for no encryption): ",
+                )
+                .unwrap();
+                let derived_key = pbkdf2_hmac_array::<Sha256, 32>(
+                    backup_enc_password.as_bytes(),
+                    PBKDF2_SALT,
+                    PBKDF2_ITERATIONS,
+                );
+                Some(KeyMaterial {
+                    key: derived_key,
+                    nonce: Some(Aes256Gcm::generate_nonce(&mut OsRng).as_slice().to_vec()),
+                })
+            } else {
+                None
+            };
+
+            wallet.backup(&working_directory.join(backup_name), backup_enc_material);
             println!("Wallet Backup Ended");
-        },
-        Commands::WalletRestore { backup_file}=> {
+        }
+        Commands::WalletRestore { backup_file } => {
             // Does it need to run before taker::init?
             println!("Initiating wallet restore, from backup: {}", backup_file);
+            let backup_file_path = PathBuf::from(backup_file);
+            let content = fs::read_to_string(&backup_file_path).expect("Failed to read backup");
 
-            let file = PathBuf::from(backup_file);
+            let restore_enc_password = utill::prompt_password(
+                "Enter restored walled encryption passphrase(empty for no encryption): ",
+            )
+            .unwrap();
+            let restore_enc_material = if restore_enc_password.is_empty() {
+                None
+            } else {
+                let derived_key = pbkdf2_hmac_array::<Sha256, 32>(
+                    restore_enc_password.as_bytes(),
+                    PBKDF2_SALT,
+                    PBKDF2_ITERATIONS,
+                );
+                Some(KeyMaterial {
+                    key: derived_key,
+                    nonce: Some(Aes256Gcm::generate_nonce(&mut OsRng).as_slice().to_vec()),
+                })
+            };
 
-            let restored_wallet = WalletBackup::restore(Path::new("./taker-wallet"), &rpc_config, &file, "taker-wallet".to_string(), None, None);
+            // Try WalletBackup first
+            let backup_enc_material = if let Ok(_) = serde_json::from_str::<WalletBackup>(&content)
+            {
+                None
+            } else if let Ok(encrypted_wallet_backup) =
+                serde_json::from_str::<EncryptedWalletBackup>(&content)
+            {
+                println!("The backup you are trying to restore is encrypted!");
 
+                let backup_enc_password =
+                    utill::prompt_password("Enter wallet backup encryption passphrase: ").unwrap();
 
+                if backup_enc_password.is_empty() {
+                    panic!("Backup encryption password cannot be empty!");
+                }
 
-            println!("Wallet Restore Ended, this is the wallet: {:?}", restored_wallet);
-        },
+                let nonce_vec = encrypted_wallet_backup.nonce.clone();
+
+                let derived_key = pbkdf2_hmac_array::<Sha256, 32>(
+                    backup_enc_password.as_bytes(),
+                    PBKDF2_SALT,
+                    PBKDF2_ITERATIONS,
+                );
+
+                Some(KeyMaterial {
+                    key: derived_key,
+                    nonce: Some(nonce_vec),
+                })
+            } else {
+                panic!("Failed to deserialize wallet backup file");
+            };
+
+            let _restored_wallet = WalletBackup::restore(
+                Path::new("./taker-wallet"), //Save the restored wallet in cur dir for debug
+                &rpc_config,
+                &backup_file_path,
+                "taker-wallet".to_string(),
+                backup_enc_material,
+                restore_enc_material,
+            );
+
+            // println!(
+            //     "Wallet Restore Ended, this is the wallet: {:?}",
+            //     restored_wallet
+            // );
+            println!("Wallet Restore Ended!!");
+        }
     }
 
     Ok(())
