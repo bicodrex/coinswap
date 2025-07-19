@@ -1,7 +1,7 @@
 use aes_gcm::{aead::Aead, Aes256Gcm, Key, KeyInit};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::wallet::KeyMaterial;
+use crate::{utill, wallet::KeyMaterial};
 use std::error::Error;
 /// Wrapper struct for storing an encrypted wallet on disk.
 ///
@@ -23,7 +23,10 @@ pub(crate) struct EncryptedData {
     pub(crate) encrypted_payload: Vec<u8>,
 }
 //TODO better error type
-pub fn encrypt_struct<T: Serialize>(plain_struct: T, enc_material: &KeyMaterial) -> Result<EncryptedData, Box<dyn Error>> {
+pub fn encrypt_struct<T: Serialize>(
+    plain_struct: T,
+    enc_material: &KeyMaterial,
+) -> Result<EncryptedData, Box<dyn Error>> {
     // Serialize wallet data to bytes.
     let packed_store = serde_cbor::ser::to_vec(&plain_struct)?;
 
@@ -43,4 +46,25 @@ pub fn encrypt_struct<T: Serialize>(plain_struct: T, enc_material: &KeyMaterial)
         nonce: material_nonce.clone(),
         encrypted_payload: ciphertext,
     })
+}
+
+pub fn decrypt_struct<T: DeserializeOwned, E: From<serde_cbor::Error> + std::fmt::Debug>(
+    encrypted_struct: EncryptedData,
+    enc_material: &KeyMaterial,
+) -> Result<T, E> {
+    // Deserialize the outer EncryptedWalletStore wrapper.
+
+    let nonce_vec = encrypted_struct.nonce.clone();
+
+    // Reconstruct AES-GCM cipher from the provided key and stored nonce.
+    let key = Key::<Aes256Gcm>::from_slice(&enc_material.key);
+    let cipher = Aes256Gcm::new(key);
+    let nonce = aes_gcm::Nonce::from_slice(&nonce_vec);
+
+    // Decrypt the inner WalletStore CBOR bytes.
+    let packed_wallet_store = cipher
+        .decrypt(nonce, encrypted_struct.encrypted_payload.as_ref())
+        .expect("Error decrypting wallet, wrong passphrase?");
+
+    utill::deserialize_from_cbor::<T, E>(packed_wallet_store)
 }
