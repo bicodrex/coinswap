@@ -3,11 +3,7 @@
 //! Wallet data is currently written in unencrypted CBOR files which are not directly human readable.
 
 use super::{api::KeyMaterial, error::WalletError, fidelity::FidelityBond};
-use aes_gcm::{
-    aead::{Aead, KeyInit},
-    Aes256Gcm,
-    Key, // Or `Aes128Gcm`
-};
+
 use bitcoin::{bip32::Xpriv, Network, OutPoint, ScriptBuf};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -18,7 +14,13 @@ use std::{
 };
 
 use super::swapcoin::{IncomingSwapCoin, OutgoingSwapCoin};
-use crate::{utill, wallet::{security::{encrypt_struct, EncryptedData as EncryptedWalletStore}, UTXOSpendInfo}};
+use crate::{
+    utill,
+    wallet::{
+        security::{decrypt_struct, encrypt_struct, EncryptedData as EncryptedWalletStore},
+        UTXOSpendInfo,
+    },
+};
 use bitcoind::bitcoincore_rpc::bitcoincore_rpc_json::ListUnspentResultEntry;
 
 /// Represents the internal data store for a Bitcoin wallet.
@@ -130,29 +132,13 @@ impl WalletStore {
             Some(material) => {
                 log::info!("Reading encrypted wallet");
 
-                // Deserialize the outer EncryptedWalletStore wrapper.
-                let encrypted_wallet: EncryptedWalletStore = utill::deserialize_from_cbor::<
-                    EncryptedWalletStore,
-                    WalletError,
-                >(reader.clone())?;
+                let encrypted_wallet: EncryptedWalletStore =
+                    utill::deserialize_from_cbor::<EncryptedWalletStore, WalletError>(reader)?;
 
-                let nonce_vec = encrypted_wallet.nonce.clone();
-
-                // Reconstruct AES-GCM cipher from the provided key and stored nonce.
-                let key = Key::<Aes256Gcm>::from_slice(&material.key);
-                let cipher = Aes256Gcm::new(key);
-                let nonce = aes_gcm::Nonce::from_slice(&nonce_vec);
-
-                // Decrypt the inner WalletStore CBOR bytes.
-                let packed_wallet_store = cipher
-                    .decrypt(nonce, encrypted_wallet.encrypted_payload.as_ref())
-                    .expect("Error decrypting wallet, wrong passphrase?");
-
+                let decrypted_wallet =
+                    decrypt_struct::<WalletStore, WalletError>(encrypted_wallet, material)?;
                 // Deserialize the decrypted WalletStore and return it with the nonce.
-                Ok((
-                    utill::deserialize_from_cbor::<Self, WalletError>(packed_wallet_store)?,
-                    Some(nonce_vec.clone()),
-                ))
+                Ok((decrypted_wallet, Some(material.clone().nonce.unwrap())))
             }
             None => {
                 // If no encryption key is provided, deserialize the WalletStore directly.
@@ -187,7 +173,7 @@ mod tests {
             Network::Bitcoin,
             master_key,
             None,
-            &None
+            &None,
         )
         .unwrap();
 
