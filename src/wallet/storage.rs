@@ -2,7 +2,7 @@
 //!
 //! Wallet data is currently written in unencrypted CBOR files which are not directly human readable.
 
-use super::{api::KeyMaterial, error::WalletError, fidelity::FidelityBond};
+use super::{error::WalletError, fidelity::FidelityBond};
 
 use bitcoin::{bip32::Xpriv, Network, OutPoint, ScriptBuf};
 use serde::{Deserialize, Serialize};
@@ -17,7 +17,7 @@ use super::swapcoin::{IncomingSwapCoin, OutgoingSwapCoin};
 use crate::{
     utill,
     wallet::{
-        security::{decrypt_struct, encrypt_struct, EncryptedData as EncryptedWalletStore},
+        security::{decrypt_struct, encrypt_struct, EncryptedData as EncryptedWalletStore, KeyMaterial},
         UTXOSpendInfo,
     },
 };

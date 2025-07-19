@@ -1,8 +1,64 @@
-use aes_gcm::{aead::Aead, Aes256Gcm, Key, KeyInit};
+use aes_gcm::{aead::{Aead, OsRng}, AeadCore, Aes256Gcm, Key, KeyInit};
+use pbkdf2::pbkdf2_hmac_array;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use sha2::Sha256;
 
-use crate::{utill, wallet::KeyMaterial};
+use crate::{utill};
 use std::error::Error;
+
+/// Salt used for key derivation from a user-provided passphrase.
+const PBKDF2_SALT: &[u8; 8] = b"coinswap";
+/// Number of PBKDF2 iterations to strengthen passphrase-derived keys.
+///
+/// In production, this is set to **600,000 iterations**, following
+/// modern password security guidance from the
+/// [OWASP Password Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html).
+///
+/// During testing or integration tests, the iteration count is reduced to 1
+/// for performance.
+const PBKDF2_ITERATIONS: u32 = if cfg!(feature = "integration-test") || cfg!(test) {
+    1
+} else {
+    600_000
+};
+
+/// Holds derived cryptographic key material used for encrypting and decrypting wallet data.
+#[derive(Debug, Clone)]
+pub struct KeyMaterial {
+    /// A 256-bit key derived from the user’s passphrase via PBKDF2.
+    /// This key is used with AES-GCM for encryption/decryption.
+    pub key: [u8; 32],
+    /// Nonce used for AES-GCM encryption, generated when a new wallet is created.
+    /// When loading an existing wallet, this is initially `None`.
+    /// It is populated after reading the stored nonce from disk.
+    pub nonce: Option<Vec<u8>>,
+    
+}
+impl KeyMaterial {
+    /// New from password
+    pub fn new_from_password(password: String) -> Self {
+        KeyMaterial {
+            key: pbkdf2_hmac_array::<Sha256, 32>(
+                password.as_bytes(),
+                PBKDF2_SALT,
+                PBKDF2_ITERATIONS,
+            ),
+            nonce: Some(Aes256Gcm::generate_nonce(&mut OsRng).as_slice().to_vec()),
+        }
+    }
+    /// Existing from password
+    pub fn existing_from_password(password: String) -> Self {
+        KeyMaterial {
+            key: pbkdf2_hmac_array::<Sha256, 32>(
+                password.as_bytes(),
+                PBKDF2_SALT,
+                PBKDF2_ITERATIONS,
+            ),
+            nonce: None,
+        }
+    }
+}
+
 /// Wrapper struct for storing an encrypted wallet on disk.
 ///
 /// The standard `WalletStore` is first serialized to CBOR, then encrypted using

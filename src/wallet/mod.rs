@@ -5,13 +5,13 @@ mod error;
 mod fidelity;
 mod funding;
 mod rpc;
+mod security;
 mod spend;
 mod split_utxos;
 mod storage;
 mod swapcoin;
-mod security;
 
-pub use api::KeyMaterial;
+pub use api::EncryptedWalletBackup;
 pub use api::Wallet;
 pub use api::WalletBackup;
 pub(crate) use api::{Balances, UTXOSpendInfo};
@@ -23,4 +23,4 @@ pub(crate) use swapcoin::{
     IncomingSwapCoin, OutgoingSwapCoin, SwapCoin, WalletSwapCoin, WatchOnlySwapCoin,
 };
 
-pub use api::EncryptedWalletBackup;
+pub use security::KeyMaterial;
