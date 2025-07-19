@@ -1,10 +1,13 @@
-use aes_gcm::{aead::{Aead, OsRng}, AeadCore, Aes256Gcm, Key, KeyInit};
+use aes_gcm::{
+    aead::{Aead, OsRng},
+    AeadCore, Aes256Gcm, Key, KeyInit,
+};
 use pbkdf2::pbkdf2_hmac_array;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sha2::Sha256;
 
-use crate::{utill};
-use std::error::Error;
+use crate::utill;
+use std::{error::Error, fs, path::Path};
 
 /// Salt used for key derivation from a user-provided passphrase.
 const PBKDF2_SALT: &[u8; 8] = b"coinswap";
@@ -32,7 +35,6 @@ pub struct KeyMaterial {
     /// When loading an existing wallet, this is initially `None`.
     /// It is populated after reading the stored nonce from disk.
     pub nonce: Option<Vec<u8>>,
-    
 }
 impl KeyMaterial {
     /// New from password
@@ -46,6 +48,28 @@ impl KeyMaterial {
             nonce: Some(Aes256Gcm::generate_nonce(&mut OsRng).as_slice().to_vec()),
         }
     }
+    /// New keymaterial type, with random nonce, with password asked to user
+    pub fn new_interactive() -> Option<Self> {
+        let wallet_enc_password = if cfg!(feature = "integration-test") || cfg!(test) {
+            "integration-test".to_string()
+        } else {
+            utill::prompt_password("Enter new encryption passphrase (empty for no encryption): ")
+                .unwrap()
+        };
+
+        if wallet_enc_password.is_empty() {
+            return None;
+        } else {
+            return Some(KeyMaterial {
+                key: pbkdf2_hmac_array::<Sha256, 32>(
+                    wallet_enc_password.as_bytes(),
+                    PBKDF2_SALT,
+                    PBKDF2_ITERATIONS,
+                ),
+                nonce: Some(Aes256Gcm::generate_nonce(&mut OsRng).as_slice().to_vec()),
+            });
+        };
+    }
     /// Existing from password
     pub fn existing_from_password(password: String) -> Self {
         KeyMaterial {
@@ -55,6 +79,18 @@ impl KeyMaterial {
                 PBKDF2_ITERATIONS,
             ),
             nonce: None,
+        }
+    }
+
+    /// Existing with the nonce
+    pub fn existing_with_nonce(password: String, nonce: Vec<u8>) -> Self {
+        KeyMaterial {
+            key: pbkdf2_hmac_array::<Sha256, 32>(
+                password.as_bytes(),
+                PBKDF2_SALT,
+                PBKDF2_ITERATIONS,
+            ),
+            nonce: Some(nonce),
         }
     }
 }
@@ -123,4 +159,36 @@ pub fn decrypt_struct<T: DeserializeOwned, E: From<serde_cbor::Error> + std::fmt
         .expect("Error decrypting wallet, wrong passphrase?");
 
     utill::deserialize_from_cbor::<T, E>(packed_wallet_store)
+}
+
+pub fn load_sensitive_struct_interactive<
+    T: DeserializeOwned,
+    E: From<serde_cbor::Error> + std::fmt::Debug,
+>(
+    path: &Path,
+) -> Result<(T, Option<KeyMaterial>), E> {
+    let content =
+        fs::read_to_string(&path).expect(format!("Failed to read the file: {:?}", path).as_str());
+
+    let sensitive_struct;
+    let encryption_material;
+    // Try WalletBackup first
+    if let Ok(unencrypted_struct) = serde_json::from_str::<T>(&content) {
+        sensitive_struct = unencrypted_struct;
+        encryption_material = None;
+    } else if let Ok(encrypted_wallet_backup) = serde_json::from_str::<EncryptedData>(&content) {
+        let encryption_password = utill::prompt_password("Enter encryption passphrase: ").unwrap();
+
+        let enc_material = KeyMaterial::existing_with_nonce(
+            encryption_password,
+            encrypted_wallet_backup.nonce.clone(),
+        );
+
+        sensitive_struct = decrypt_struct::<T, E>(encrypted_wallet_backup, &enc_material)
+            .expect(format!("Failed to deserialize file: {:?}", path).as_str());
+        encryption_material = Some(enc_material);
+    } else {
+        panic!("Failed to deserialize file {:?}", path);
+    }
+    Ok((sensitive_struct, encryption_material))
 }
