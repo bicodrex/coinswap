@@ -9,6 +9,7 @@ mod spend;
 mod split_utxos;
 mod storage;
 mod swapcoin;
+mod security;
 
 pub use api::KeyMaterial;
 pub use api::Wallet;

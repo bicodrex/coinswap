@@ -18,28 +18,8 @@ use std::{
 };
 
 use super::swapcoin::{IncomingSwapCoin, OutgoingSwapCoin};
-use crate::{utill, wallet::UTXOSpendInfo};
+use crate::{utill, wallet::{security::{encrypt_struct, EncryptedData as EncryptedWalletStore}, UTXOSpendInfo}};
 use bitcoind::bitcoincore_rpc::bitcoincore_rpc_json::ListUnspentResultEntry;
-
-/// Wrapper struct for storing an encrypted wallet on disk.
-///
-/// The standard `WalletStore` is first serialized to CBOR, then encrypted using
-/// [AES-GCM](https://en.wikipedia.org/wiki/Galois/Counter_Mode).
-///
-/// The resulting ciphertext is stored in `encrypted_wallet_store`, and the AES-GCM
-/// nonce used for encryption is stored in `nonce`.
-///
-/// Note: The term “IV” (Initialization Vector) used in AES-GCM — including in the linked Wikipedia page —
-/// refers to the same value as the nonce. They are conceptually the same in this context.
-///
-/// This wrapper itself is then serialized to CBOR and written to disk.
-#[derive(Serialize, Deserialize, Debug)]
-struct EncryptedWalletStore {
-    /// Nonce used for AES-GCM encryption (must match during decryption).
-    nonce: Vec<u8>,
-    /// AES-GCM-encrypted CBOR-serialized `WalletStore` data.
-    encrypted_wallet_store: Vec<u8>,
-}
 
 /// Represents the internal data store for a Bitcoin wallet.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -124,25 +104,7 @@ impl WalletStore {
             Some(material) => {
                 // Encryption branch: encrypt the serialized wallet before writing.
 
-                // Serialize wallet data to bytes.
-                let packed_store = serde_cbor::ser::to_vec(&self)?;
-
-                // Extract nonce and key for AES-GCM.
-                let material_nonce = material.nonce.as_ref().unwrap();
-                let nonce = aes_gcm::Nonce::from_slice(material_nonce);
-                let key = Key::<Aes256Gcm>::from_slice(&material.key);
-
-                // Create AES-GCM cipher instance.
-                let cipher = Aes256Gcm::new(key);
-
-                // Encrypt the serialized wallet bytes.
-                let ciphertext = cipher.encrypt(nonce, packed_store.as_ref()).unwrap();
-
-                // Package encrypted data with nonce for storage.
-                let encrypted = EncryptedWalletStore {
-                    nonce: material_nonce.clone(),
-                    encrypted_wallet_store: ciphertext,
-                };
+                let encrypted = encrypt_struct(self, material).unwrap();
 
                 // Write encrypted wallet data to disk.
                 serde_cbor::to_writer(writer, &encrypted)?;
@@ -183,7 +145,7 @@ impl WalletStore {
 
                 // Decrypt the inner WalletStore CBOR bytes.
                 let packed_wallet_store = cipher
-                    .decrypt(nonce, encrypted_wallet.encrypted_wallet_store.as_ref())
+                    .decrypt(nonce, encrypted_wallet.encrypted_payload.as_ref())
                     .expect("Error decrypting wallet, wrong passphrase?");
 
                 // Deserialize the decrypted WalletStore and return it with the nonce.
