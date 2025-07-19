@@ -8,7 +8,7 @@ use std::{convert::TryFrom, fmt::Display, fs, io::Write, path::PathBuf, str::Fro
 use std::collections::HashMap;
 
 use aes_gcm::{
-    aead::{Aead, AeadCore, OsRng},
+    aead::{Aead},
     Aes256Gcm, Key, KeyInit,
 };
 
@@ -23,9 +23,7 @@ use bitcoin::{
     Weight,
 };
 use bitcoind::bitcoincore_rpc::{bitcoincore_rpc_json::ListUnspentResultEntry, Client, RpcApi};
-use pbkdf2::pbkdf2_hmac_array;
 use serde::{Deserialize, Serialize};
-use sha2::Sha256;
 use std::path::Path;
 
 use crate::{
@@ -35,6 +33,7 @@ use crate::{
         compute_checksum, generate_keypair, get_hd_path_from_descriptor,
         redeemscript_to_scriptpubkey,
     },
+    wallet::security::KeyMaterial,
 };
 
 use rust_coinselect::{
@@ -56,21 +55,6 @@ use super::{
 
 const HARDENDED_DERIVATION: &str = "m/84'/1'/0'";
 
-/// Salt used for key derivation from a user-provided passphrase.
-const PBKDF2_SALT: &[u8; 8] = b"coinswap";
-/// Number of PBKDF2 iterations to strengthen passphrase-derived keys.
-///
-/// In production, this is set to **600,000 iterations**, following
-/// modern password security guidance from the
-/// [OWASP Password Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html).
-///
-/// During testing or integration tests, the iteration count is reduced to 1
-/// for performance.
-const PBKDF2_ITERATIONS: u32 = if cfg!(feature = "integration-test") || cfg!(test) {
-    1
-} else {
-    600_000
-};
 #[derive(Serialize, Deserialize, Debug)]
 /// Encrypted wallet backup
 pub struct EncryptedWalletBackup {
@@ -80,17 +64,7 @@ pub struct EncryptedWalletBackup {
     /// AES-GCM-encrypted CBOR-serialized `WalletBackup` data.
     pub encrypted_wallet_backup: Vec<u8>,
 }
-/// Holds derived cryptographic key material used for encrypting and decrypting wallet data.
-#[derive(Debug, Clone)]
-pub struct KeyMaterial {
-    /// A 256-bit key derived from the user’s passphrase via PBKDF2.
-    /// This key is used with AES-GCM for encryption/decryption.
-    pub key: [u8; 32],
-    /// Nonce used for AES-GCM encryption, generated when a new wallet is created.
-    /// When loading an existing wallet, this is initially `None`.
-    /// It is populated after reading the stored nonce from disk.
-    pub nonce: Option<Vec<u8>>,
-}
+
 /// Represents a wallet backup
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WalletBackup {
@@ -124,7 +98,7 @@ impl WalletBackup {
         backup_file: &PathBuf,
         restore_name: String,
         backup_enc_material: Option<KeyMaterial>,
-        restored_enc_material: Option<KeyMaterial>
+        restored_enc_material: Option<KeyMaterial>,
     ) -> Wallet {
         let mut backup_file_with_ext = backup_file.clone();
         backup_file_with_ext.set_extension("json");
@@ -514,6 +488,10 @@ impl Wallet {
     ) -> Result<Wallet, WalletError> {
         //TODO: Check if wallet is unencrypted, and avoid asking passphrase, like in WalletBackup::restore, we can also remote the integration-test hardcoded password and create an unencrypted wallet
         // For tests or integration tests, use a fixed password. Otherwise prompt user.
+
+        //Check if exist. If Not Create
+        //If exist, check if encrypted, or not. If not load
+        //If exist, and encrypted, ask password.
         let wallet_enc_password = if cfg!(feature = "integration-test") || cfg!(test) {
             "integration-test".to_string()
         } else {
@@ -527,25 +505,14 @@ impl Wallet {
             None
         } else {
             // Derive a 256-bit encryption key from the passphrase using PBKDF2.
-            let derived_key = pbkdf2_hmac_array::<Sha256, 32>(
-                wallet_enc_password.as_bytes(),
-                PBKDF2_SALT,
-                PBKDF2_ITERATIONS,
-            );
             // Generate a nonce only if creating a new wallet, else defer nonce reading.
-            let nonce = if path.exists() {
+            if path.exists() {
                 //Will be filled after loading, by the Wallet::load method
-                None
+                Some(KeyMaterial::existing_from_password(wallet_enc_password))
             } else {
                 // Generate a fresh nonce for encrypting a new wallet.
-                let generated_nonce = Aes256Gcm::generate_nonce(&mut OsRng);
-                Some(generated_nonce.as_slice().to_vec())
-            };
-
-            Some(KeyMaterial {
-                key: derived_key,
-                nonce,
-            })
+                Some(KeyMaterial::new_from_password(wallet_enc_password))
+            }
         };
 
         let wallet = if path.exists() {
