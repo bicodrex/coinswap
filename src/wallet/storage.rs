@@ -8,18 +8,15 @@ use bitcoin::{bip32::Xpriv, Network, OutPoint, ScriptBuf};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    fs::{self, read, File},
+    fs::{self, File},
     io::BufWriter,
     path::Path,
 };
 
 use super::swapcoin::{IncomingSwapCoin, OutgoingSwapCoin};
-use crate::{
-    utill,
-    wallet::{
-        security::{decrypt_struct, encrypt_struct, EncryptedData as EncryptedWalletStore, KeyMaterial},
-        UTXOSpendInfo,
-    },
+use crate::wallet::{
+    security::{encrypt_struct, load_sensitive_struct_interactive, KeyMaterial},
+    UTXOSpendInfo,
 };
 use bitcoind::bitcoincore_rpc::bitcoincore_rpc_json::ListUnspentResultEntry;
 
@@ -118,32 +115,11 @@ impl WalletStore {
     /// Reads from a path (errors if path doesn't exist).
     /// If `store_enc_material` is provided, attempts to decrypt the file using the
     /// provided key. Returns the deserialized `WalletStore` and the nonce.
-    pub(crate) fn read_from_disk(
-        path: &Path,
-        store_enc_material: &Option<KeyMaterial>,
-    ) -> Result<(Self, Option<Vec<u8>>), WalletError> {
-        let reader = read(path)?;
+    pub(crate) fn read_from_disk(path: &Path) -> Result<(Self, Option<KeyMaterial>), WalletError> {
+        let (wallet_store, store_enc_material) =
+            load_sensitive_struct_interactive::<Self, WalletError>(path)?;
 
-        match store_enc_material {
-            Some(material) => {
-                log::info!("Reading encrypted wallet");
-
-                let encrypted_wallet: EncryptedWalletStore =
-                    utill::deserialize_from_cbor::<EncryptedWalletStore, WalletError>(reader)?;
-
-                let decrypted_wallet =
-                    decrypt_struct::<WalletStore, WalletError>(encrypted_wallet, material)?;
-                // Deserialize the decrypted WalletStore and return it with the nonce.
-                Ok((decrypted_wallet, Some(material.clone().nonce.unwrap())))
-            }
-            None => {
-                // If no encryption key is provided, deserialize the WalletStore directly.
-                Ok((
-                    utill::deserialize_from_cbor::<Self, WalletError>(reader)?,
-                    None,
-                ))
-            }
-        }
+        Ok((wallet_store, store_enc_material))
     }
 }
 
@@ -177,7 +153,7 @@ mod tests {
             .write_to_disk(&file_path, &None)
             .unwrap();
 
-        let (read_wallet, _nonce) = WalletStore::read_from_disk(&file_path, &None).unwrap();
+        let (read_wallet, _nonce) = WalletStore::read_from_disk(&file_path).unwrap();
         assert_eq!(original_wallet_store, read_wallet);
     }
 }
