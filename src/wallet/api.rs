@@ -31,7 +31,7 @@ use crate::{
         compute_checksum, generate_keypair, get_hd_path_from_descriptor, prompt_password,
         redeemscript_to_scriptpubkey, MIN_FEE_RATE,
     },
-    wallet::security::KeyMaterial,
+    wallet::security::{decrypt_struct, encrypt_struct, EncryptedData, KeyMaterial},
     wallet::split_utxos::MAX_SPLITS,
 };
 
@@ -53,16 +53,6 @@ use super::{
 // for example which privkey corresponds to a scriptpubkey is stored in hd paths
 
 const HARDENDED_DERIVATION: &str = "m/84'/1'/0'";
-
-#[derive(Serialize, Deserialize, Debug)]
-/// Encrypted wallet backup
-pub struct EncryptedWalletBackup {
-    //TODO: merge also encryptedWalletStore, they are the same
-    /// Nonce used for AES-GCM encryption (must match during decryption).
-    pub nonce: Vec<u8>,
-    /// AES-GCM-encrypted CBOR-serialized `WalletBackup` data.
-    pub encrypted_wallet_backup: Vec<u8>,
-}
 
 /// Represents a wallet backup
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -108,26 +98,13 @@ impl WalletBackup {
         // Try WalletBackup first
         if let Ok(unencrypted_wallet_backup) = serde_json::from_str::<WalletBackup>(&content) {
             wallet_backup = unencrypted_wallet_backup;
-        } else if let Ok(encrypted_wallet_backup) =
-            serde_json::from_str::<EncryptedWalletBackup>(&content)
+        } else if let Ok(encrypted_wallet_backup) = serde_json::from_str::<EncryptedData>(&content)
         {
-            let derived_key = backup_enc_material.unwrap().key;
-
-            // Reconstruct AES-GCM cipher from the provided key and stored nonce.
-            let key = Key::<Aes256Gcm>::from_slice(&derived_key);
-            let cipher = Aes256Gcm::new(key);
-            let nonce = aes_gcm::Nonce::from_slice(&encrypted_wallet_backup.nonce);
-
-            // Decrypt the inner WalletBackupbytes.
-            let packed_wallet_store = cipher
-                .decrypt(
-                    nonce,
-                    encrypted_wallet_backup.encrypted_wallet_backup.as_ref(),
-                )
-                .expect("Error decrypting wallet, wrong passphrase?");
-
-            wallet_backup = serde_json::from_str(str::from_utf8(&packed_wallet_store).unwrap())
-                .expect("Failed to deserialize wallet backup file");
+            wallet_backup = decrypt_struct::<WalletBackup, WalletError>(
+                encrypted_wallet_backup,
+                &backup_enc_material.unwrap(),
+            )
+            .expect("Failed to deserialize wallet backup file");
         } else {
             panic!("Failed to deserialize wallet backup file");
         }
@@ -394,31 +371,9 @@ impl Wallet {
 
         match backup_enc_material {
             Some(key_material) => {
-                //TODO: Refactor into single procedure, same code as encryption mechanism
+                //TODO: Check json serialization(like this CBOR is encrypted and then stored json)
+                let encrypted = encrypt_struct(backup, &key_material).unwrap();
 
-                //generated_nonce.as_slice().to_vec()
-
-                // Encryption branch: encrypt the serialized wallet before writing.
-
-                // Serialize wallet data to bytes.
-                let serialized_backup = json.as_bytes();
-
-                // Extract nonce and key for AES-GCM.
-                let material_nonce = key_material.nonce.clone().unwrap();
-                let nonce = aes_gcm::Nonce::from_slice(&material_nonce);
-                let key = Key::<Aes256Gcm>::from_slice(&key_material.key);
-
-                // Create AES-GCM cipher instance.
-                let cipher = Aes256Gcm::new(key);
-
-                // Encrypt the serialized wallet bytes.
-                let ciphertext = cipher.encrypt(nonce, serialized_backup.as_ref()).unwrap();
-
-                // Package encrypted data with nonce for storage.
-                let encrypted = EncryptedWalletBackup {
-                    nonce: material_nonce,
-                    encrypted_wallet_backup: ciphertext,
-                };
                 let encrypted_json = serde_json::to_string_pretty(&encrypted).unwrap();
                 let mut file = fs::File::create(backup_path).unwrap();
                 file.write_all(encrypted_json.as_bytes()).unwrap();
@@ -434,12 +389,8 @@ impl Wallet {
     /// Load wallet data from file and connect to a core RPC.
     /// The core rpc wallet name, and wallet_id field in the file should match.
     /// If encryption material is provided, decrypt the wallet store using it.
-    pub(crate) fn load(
-        path: &Path,
-        rpc_config: &RPCConfig,
-        store_enc_material: &Option<KeyMaterial>,
-    ) -> Result<Wallet, WalletError> {
-        let (store, nonce) = WalletStore::read_from_disk(path, store_enc_material)?;
+    pub(crate) fn load(path: &Path, rpc_config: &RPCConfig) -> Result<Wallet, WalletError> {
+        let (store, store_enc_material) = WalletStore::read_from_disk(path)?;
 
         if rpc_config.wallet_name != store.file_name {
             return Err(WalletError::General(format!(
@@ -467,22 +418,11 @@ impl Wallet {
             store.outgoing_swapcoins.len()
         );
 
-        // The input `store_enc_material` has a key but no nonce before reading from disk.
-        // After reading, combine the key with the stored nonce to create a complete KeyMaterial
-        // used for subsequent encryption/decryption operations.
-        let updated_enc_material = match (store_enc_material, nonce) {
-            (Some(material), Some(nonce)) => Some(KeyMaterial {
-                key: material.key,
-                nonce: Some(nonce),
-            }),
-            _ => None,
-        };
-
         Ok(Self {
             rpc,
             wallet_file_path: path.to_path_buf(),
             store,
-            store_enc_material: updated_enc_material,
+            store_enc_material: store_enc_material,
         })
     }
 
@@ -495,41 +435,17 @@ impl Wallet {
         path: &Path,
         rpc_config: &RPCConfig,
     ) -> Result<Wallet, WalletError> {
-        //TODO: Check if wallet is unencrypted, and avoid asking passphrase, like in WalletBackup::restore, we can also remote the integration-test hardcoded password and create an unencrypted wallet
-        // For tests or integration tests, use a fixed password. Otherwise prompt user.
-
-        //Check if exist. If Not Create
-        //If exist, check if encrypted, or not. If not load
-        //If exist, and encrypted, ask password.
-        let wallet_enc_password = if cfg!(feature = "integration-test") || cfg!(test) {
-            "integration-test".to_string()
-        } else {
-            prompt_password("Enter wallet encryption passphrase (empty for no encryption): ")?
-        };
-
-        // If user entered empty password, no encryption key material is created.
-        let key = if wallet_enc_password.is_empty() {
-            None
-        } else {
-            // Derive a 256-bit encryption key from the passphrase using PBKDF2.
-            // Generate a nonce only if creating a new wallet, else defer nonce reading.
-            if path.exists() {
-                //Will be filled after loading, by the Wallet::load method
-                Some(KeyMaterial::existing_from_password(wallet_enc_password))
-            } else {
-                // Generate a fresh nonce for encrypting a new wallet.
-                Some(KeyMaterial::new_from_password(wallet_enc_password))
-            }
-        };
-
         let wallet = if path.exists() {
             // wallet already exists, load the wallet
-            let wallet = Wallet::load(path, rpc_config, &key)?;
+            let wallet = Wallet::load(path, rpc_config)?;
             log::info!("Wallet file at {path:?} successfully loaded.");
             wallet
         } else {
             // wallet doesn't exists at the given path, create a new one
-            let wallet = Wallet::init(path, rpc_config, key)?;
+
+            let store_enc_material = KeyMaterial::new_interactive();
+
+            let wallet = Wallet::init(path, rpc_config, store_enc_material)?;
 
             log::info!("New Wallet created at : {path:?}");
             wallet

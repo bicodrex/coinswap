@@ -11,16 +11,14 @@ mod split_utxos;
 mod storage;
 mod swapcoin;
 
-pub use api::EncryptedWalletBackup;
 pub use api::Wallet;
 pub use api::WalletBackup;
 pub(crate) use api::{Balances, UTXOSpendInfo};
 pub use error::WalletError;
 pub(crate) use fidelity::{fidelity_redeemscript, FidelityBond, FidelityError};
 pub use rpc::RPCConfig;
+pub use security::KeyMaterial;
 pub use spend::Destination;
 pub(crate) use swapcoin::{
     IncomingSwapCoin, OutgoingSwapCoin, SwapCoin, WalletSwapCoin, WatchOnlySwapCoin,
 };
-
-pub use security::KeyMaterial;
