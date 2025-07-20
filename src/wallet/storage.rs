@@ -9,14 +9,14 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     fs::{self, File},
-    io::{BufWriter, Write},
+    io::{BufWriter},
     path::Path,
 };
 
 use super::swapcoin::{IncomingSwapCoin, OutgoingSwapCoin};
 use crate::wallet::{
     security::{encrypt_struct, load_sensitive_struct_interactive, KeyMaterial},
-    UTXOSpendInfo,
+    SerdeCbor, UTXOSpendInfo,
 };
 use bitcoind::bitcoincore_rpc::bitcoincore_rpc_json::ListUnspentResultEntry;
 
@@ -92,8 +92,9 @@ impl WalletStore {
         path: &Path,
         store_enc_material: &Option<KeyMaterial>,
     ) -> Result<(), WalletError> {
-        let mut file = fs::File::create(path).unwrap();
-        let json;
+        let wallet_file = fs::OpenOptions::new().write(true).open(path)?;
+        let writer = BufWriter::new(wallet_file);
+
         match store_enc_material {
             Some(material) => {
                 // Encryption branch: encrypt the serialized wallet before writing.
@@ -101,14 +102,13 @@ impl WalletStore {
                 let encrypted = encrypt_struct(self, material).unwrap();
 
                 // Write encrypted wallet data to disk.
-                json = serde_json::to_string_pretty(&encrypted).unwrap()
+                serde_cbor::to_writer(writer, &encrypted)?;
             }
             None => {
                 // No encryption: serialize and write the wallet directly.
-                json = serde_json::to_string_pretty(&self).unwrap()
+                serde_cbor::to_writer(writer, &self)?;
             }
         }
-        file.write_all(json.as_bytes()).unwrap();
         Ok(())
     }
 
@@ -117,7 +117,7 @@ impl WalletStore {
     /// provided key. Returns the deserialized `WalletStore` and the nonce.
     pub(crate) fn read_from_disk(path: &Path) -> Result<(Self, Option<KeyMaterial>), WalletError> {
         let (wallet_store, store_enc_material) =
-            load_sensitive_struct_interactive::<Self, WalletError>(path)?;
+            load_sensitive_struct_interactive::<Self, WalletError, SerdeCbor>(path)?;
 
         Ok((wallet_store, store_enc_material))
     }

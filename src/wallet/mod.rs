@@ -22,3 +22,5 @@ pub(crate) use swapcoin::{
 pub use api::WalletBackup;
 pub use api::Wallet;
 pub use security::KeyMaterial;
+pub use security::SerdeCbor;
+pub use security::SerdeJson;
