@@ -9,6 +9,26 @@ use sha2::Sha256;
 use crate::utill;
 use std::{error::Error, fs, path::Path};
 
+pub trait SerdeFormat {
+    fn from_slice<T: DeserializeOwned>(input: &[u8]) -> Result<T, Box<dyn std::error::Error>>;
+}
+/// SerdeJson
+pub struct SerdeJson;
+
+impl SerdeFormat for SerdeJson {
+    fn from_slice<T: DeserializeOwned>(input: &[u8]) -> Result<T, Box<dyn std::error::Error>> {
+        Ok(serde_json::from_slice(input)?)
+    }
+}
+/// SerdeCbor
+pub struct SerdeCbor;
+
+impl SerdeFormat for SerdeCbor {
+    fn from_slice<T: DeserializeOwned>(input: &[u8]) -> Result<T, Box<dyn std::error::Error>> {
+        Ok(serde_cbor::from_slice(input)?)
+    }
+}
+
 /// Salt used for key derivation from a user-provided passphrase.
 const PBKDF2_SALT: &[u8; 8] = b"coinswap";
 /// Number of PBKDF2 iterations to strengthen passphrase-derived keys.
@@ -50,12 +70,9 @@ impl KeyMaterial {
     }
     /// New keymaterial type, with random nonce, with password asked to user
     pub fn new_interactive() -> Option<Self> {
-        let wallet_enc_password = if cfg!(feature = "integration-test") || cfg!(test) {
-            "integration-test".to_string()
-        } else {
+        let wallet_enc_password =
             utill::prompt_password("Enter new encryption passphrase (empty for no encryption): ")
-                .unwrap()
-        };
+                .unwrap();
 
         if wallet_enc_password.is_empty() {
             return None;
@@ -114,6 +131,8 @@ pub(crate) struct EncryptedData {
     /// AES-GCM-encrypted CBOR-serialized `WalletStore` data.
     pub(crate) encrypted_payload: Vec<u8>,
 }
+
+/// This is the flow: Struct -> Serialized(Struct) -> Encrypted(Serialized(Struct)) -> Serialized(Encrypted(Serialized(Struct)))
 //TODO better error type
 pub fn encrypt_struct<T: Serialize>(
     plain_struct: T,
@@ -161,23 +180,22 @@ pub fn decrypt_struct<T: DeserializeOwned, E: From<serde_cbor::Error> + std::fmt
     utill::deserialize_from_cbor::<T, E>(packed_wallet_store)
 }
 
-//TODO: This need to work with both json and cbor
 pub fn load_sensitive_struct_interactive<
     T: DeserializeOwned,
     E: From<serde_cbor::Error> + std::fmt::Debug,
+    F: SerdeFormat,
 >(
     path: &Path,
 ) -> Result<(T, Option<KeyMaterial>), E> {
-    let content =
-        fs::read_to_string(&path).expect(format!("Failed to read the file: {:?}", path).as_str());
+    let content = fs::read(&path).expect(format!("Failed to read the file: {:?}", path).as_str());
 
     let sensitive_struct;
     let encryption_material;
     // Try WalletBackup first
-    if let Ok(unencrypted_struct) = serde_json::from_str::<T>(&content) {
+    if let Ok(unencrypted_struct) = F::from_slice::<T>(&content) {
         sensitive_struct = unencrypted_struct;
         encryption_material = None;
-    } else if let Ok(encrypted_wallet_backup) = serde_json::from_str::<EncryptedData>(&content) {
+    } else if let Ok(encrypted_wallet_backup) = F::from_slice::<EncryptedData>(&content) {
         let encryption_password = utill::prompt_password("Enter encryption passphrase: ").unwrap();
 
         let enc_material = KeyMaterial::existing_with_nonce(
