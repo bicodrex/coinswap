@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     fs::{self, File},
-    io::BufWriter,
+    io::{BufWriter, Write},
     path::Path,
 };
 
@@ -96,9 +96,8 @@ impl WalletStore {
         path: &Path,
         store_enc_material: &Option<KeyMaterial>,
     ) -> Result<(), WalletError> {
-        let wallet_file = fs::OpenOptions::new().write(true).open(path)?;
-        let writer = BufWriter::new(wallet_file);
-
+        let mut file = fs::File::create(path).unwrap();
+        let json;
         match store_enc_material {
             Some(material) => {
                 // Encryption branch: encrypt the serialized wallet before writing.
@@ -106,13 +105,14 @@ impl WalletStore {
                 let encrypted = encrypt_struct(self, material).unwrap();
 
                 // Write encrypted wallet data to disk.
-                serde_cbor::to_writer(writer, &encrypted)?;
+                json = serde_json::to_string_pretty(&encrypted).unwrap()
             }
             None => {
                 // No encryption: serialize and write the wallet directly.
-                serde_cbor::to_writer(writer, &self)?;
+                json = serde_json::to_string_pretty(&self).unwrap()
             }
         }
+        file.write_all(json.as_bytes()).unwrap();
         Ok(())
     }
 

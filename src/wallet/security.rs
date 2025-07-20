@@ -161,6 +161,7 @@ pub fn decrypt_struct<T: DeserializeOwned, E: From<serde_cbor::Error> + std::fmt
     utill::deserialize_from_cbor::<T, E>(packed_wallet_store)
 }
 
+//TODO: This need to work with both json and cbor
 pub fn load_sensitive_struct_interactive<
     T: DeserializeOwned,
     E: From<serde_cbor::Error> + std::fmt::Debug,
