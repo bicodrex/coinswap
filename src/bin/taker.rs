@@ -7,7 +7,7 @@ use coinswap::{
     utill::{
         self, parse_proxy_auth, setup_taker_logger, ConnectionType, DEFAULT_TX_FEE_RATE, UTXO,
     },
-    wallet::{Destination, EncryptedWalletBackup, KeyMaterial, RPCConfig, WalletBackup},
+    wallet::{Destination, KeyMaterial, RPCConfig, WalletBackup},
 };
 use log::LevelFilter;
 use pbkdf2::pbkdf2_hmac_array;
@@ -288,6 +288,7 @@ fn main() -> Result<(), TakerError> {
             taker.recover_from_swap()?;
         }
         Commands::WalletBackup { encrypt } => {
+            /*
             // Ok to work after wallet loaded
             println!("Initiating wallet backup.");
 
@@ -321,9 +322,11 @@ fn main() -> Result<(), TakerError> {
 
             wallet.backup(&working_directory.join(backup_name), backup_enc_material);
             println!("Wallet Backup Ended");
+            */
         }
         Commands::WalletRestore { backup_file } => {
             // Does it need to run before taker::init?
+            /*
             println!("Initiating wallet restore, from backup: {}", backup_file);
             let backup_file_path = PathBuf::from(backup_file);
             let content = fs::read_to_string(&backup_file_path).expect("Failed to read backup");
@@ -392,6 +395,7 @@ fn main() -> Result<(), TakerError> {
             //     restored_wallet
             // );
             println!("Wallet Restore Ended!!");
+            */
         }
     }
 
