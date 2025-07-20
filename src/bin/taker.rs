@@ -5,7 +5,7 @@ use clap::Parser;
 use coinswap::{
     taker::{error::TakerError, SwapParams, Taker, TakerBehavior},
     utill::{self, parse_proxy_auth, setup_taker_logger, ConnectionType, MIN_FEE_RATE, UTXO},
-    wallet::{Destination, EncryptedWalletBackup, KeyMaterial, RPCConfig, WalletBackup},
+    wallet::{Destination, KeyMaterial, RPCConfig, WalletBackup},
 };
 use log::LevelFilter;
 use pbkdf2::pbkdf2_hmac_array;
@@ -268,6 +268,7 @@ fn main() -> Result<(), TakerError> {
             taker.recover_from_swap()?;
         }
         Commands::WalletBackup { encrypt } => {
+            /*
             // Ok to work after wallet loaded
             println!("Initiating wallet backup.");
 
@@ -277,9 +278,11 @@ fn main() -> Result<(), TakerError> {
                 env::current_dir().expect("Failed to get current directory");
             wallet.backup(&working_directory, None);
             println!("Wallet Backup Ended");
+            */
         }
         Commands::WalletRestore { backup_file } => {
             // Does it need to run before taker::init?
+            /*
             println!("Initiating wallet restore, from backup: {}", backup_file);
 
             let file = PathBuf::from(backup_file);
@@ -293,10 +296,12 @@ fn main() -> Result<(), TakerError> {
                 None,
             );
 
-            println!(
-                "Wallet Restore Ended, this is the wallet: {:?}",
-                restored_wallet
-            );
+            // println!(
+            //     "Wallet Restore Ended, this is the wallet: {:?}",
+            //     restored_wallet
+            // );
+            println!("Wallet Restore Ended!!");
+            */
         }
     }
 
