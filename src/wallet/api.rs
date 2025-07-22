@@ -25,15 +25,17 @@ use bitcoind::bitcoincore_rpc::{bitcoincore_rpc_json::ListUnspentResultEntry, Cl
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use crate::utill;
 use crate::{
     protocol::contract,
+    utill,
     utill::{
         compute_checksum, generate_keypair, get_hd_path_from_descriptor,
         redeemscript_to_scriptpubkey, MIN_FEE_RATE,
     },
-    wallet::security::{decrypt_struct, encrypt_struct, EncryptedData, KeyMaterial},
-    wallet::split_utxos::MAX_SPLITS,
+    wallet::{
+        security::{decrypt_struct, encrypt_struct, EncryptedData, KeyMaterial},
+        split_utxos::MAX_SPLITS,
+    },
 };
 
 use rust_coinselect::{
