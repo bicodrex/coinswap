@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     fs::{self, File},
-    io::{BufWriter},
+    io::BufWriter,
     path::Path,
 };
 
