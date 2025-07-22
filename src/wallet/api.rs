@@ -3,7 +3,7 @@
 //! Currently, wallet synchronization is exclusively performed through RPC for makers.
 //! In the future, takers might adopt alternative synchronization methods, such as lightweight wallet solutions.
 
-use std::{convert::TryFrom, fmt::Display, fs, io::Write, path::PathBuf, str::FromStr};
+use std::{convert::TryFrom, env, fmt::Display, fs, io::Write, path::PathBuf, str::FromStr};
 
 use std::collections::HashMap;
 
@@ -25,6 +25,7 @@ use bitcoind::bitcoincore_rpc::{bitcoincore_rpc_json::ListUnspentResultEntry, Cl
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+use crate::utill;
 use crate::{
     protocol::contract,
     utill::{
@@ -384,6 +385,92 @@ impl Wallet {
                 file.write_all(json.as_bytes()).unwrap();
             }
         }
+    }
+
+    /// Restore interactive
+    pub fn restore_interactive(backup_file_path: &PathBuf, rpc_config: &RPCConfig, restore_name: String) {
+        println!(
+            "Initiating wallet restore, from backup: {:?}",
+            backup_file_path
+        );
+
+        
+        let content = fs::read_to_string(&backup_file_path).expect("Failed to read backup");
+
+        let restore_enc_password = utill::prompt_password(
+            "Enter restored walled encryption passphrase(empty for no encryption): ",
+        )
+        .unwrap();
+        let restore_enc_material = if restore_enc_password.is_empty() {
+            None
+        } else {
+            Some(KeyMaterial::new_from_password(restore_enc_password))
+        };
+        
+        
+        // Try WalletBackup first
+        let backup_enc_material = if let Ok(_) = serde_json::from_str::<WalletBackup>(&content)
+        {
+            None
+        } else if let Ok(encrypted_wallet_backup) =
+            serde_json::from_str::<EncryptedData>(&content)
+        {
+            println!("The backup you are trying to restore is encrypted!");
+
+            let backup_enc_password =
+                utill::prompt_password("Enter wallet backup encryption passphrase: ").unwrap();
+
+            if backup_enc_password.is_empty() {
+                panic!("Backup encryption password cannot be empty!");
+            }
+
+            let nonce_vec = encrypted_wallet_backup.nonce.clone();
+
+            Some(KeyMaterial::existing_with_nonce(
+                backup_enc_password,
+                nonce_vec,
+            ))
+        } else {
+            panic!("Failed to deserialize wallet backup file");
+        };
+
+        // FIXME: check why sometimes it gives me error when I try to load with different bitcoin core name
+        let _restored_wallet = WalletBackup::restore(
+            Path::new("./taker-wallet"), //Save the restored wallet in cur dir for debug
+            &rpc_config,
+            &backup_file_path,
+            restore_name,
+            backup_enc_material,
+            restore_enc_material,
+        );
+        
+        // println!(
+        //     "Wallet Restore Ended, this is the wallet: {:?}",
+        //     restored_wallet
+        // );
+        println!("Wallet Restore Ended!!");
+    }
+    /// Backup interactive
+    pub fn backup_interactive(wallet: &Self, encrypt: bool) {
+        println!("Initiating wallet backup.");
+
+        let backup_name = format!("{}-backup", wallet.get_name());
+        println!(
+            "Backing up wallet: {} to {}",
+            wallet.get_name(),
+            backup_name
+        );
+        let working_directory: PathBuf =
+            env::current_dir().expect("Failed to get current directory");
+
+        let backup_enc_material = if encrypt {
+            KeyMaterial::new_interactive()
+        } else {
+            None
+        };
+
+        wallet.backup(&working_directory.join(backup_name), backup_enc_material);
+        println!("Wallet Backup Ended");
     }
 
     /// Load wallet data from file and connect to a core RPC.

@@ -25,7 +25,7 @@ pub struct SerdeCbor;
 
 impl SerdeFormat for SerdeCbor {
     fn from_slice<T: DeserializeOwned>(input: &[u8]) -> Result<T, Box<dyn std::error::Error>> {
-        Ok(serde_cbor::from_slice(input)?)
+        Ok(utill::deserialize_from_cbor::<T,Box<dyn std::error::Error>>(input.to_vec())?)
     }
 }
 

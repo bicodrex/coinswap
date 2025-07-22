@@ -8,8 +8,8 @@ mod test_framework;
 use std::{fs, path::PathBuf};
 
 use aes_gcm::{aead::OsRng, AeadCore, Aes256Gcm};
-use bitcoin::Amount;
-use bitcoind::{bitcoincore_rpc::Auth, BitcoinD};
+use bitcoin::{Address, Amount};
+use bitcoind::{bitcoincore_rpc::{self, Auth}, BitcoinD};
 use log::info;
 
 use coinswap::wallet::{KeyMaterial, RPCConfig, WalletBackup};
@@ -70,6 +70,19 @@ fn cleanup(bitcoind: &mut BitcoinD) {
     bitcoind.stop().unwrap();
 }
 
+
+fn send_and_mine(
+    bitcoind: &mut BitcoinD,
+    address: &Address,
+    btc_amount: f64,
+    blocks_to_generate: u64,
+) -> Result<(), bitcoincore_rpc::Error> {
+    send_to_address(&bitcoind, address, Amount::from_btc(btc_amount)?);
+    generate_blocks(&bitcoind, blocks_to_generate);
+    Ok(())
+}
+
+
 #[test]
 fn plainwallet_plainbackup_plainrestore() {
     info!("Running Test: Creating Wallet file, backing it up, then recieve a payment, and restore backup");
@@ -84,13 +97,14 @@ fn plainwallet_plainbackup_plainrestore() {
     ) = setup("plain_wallet_plainbackup_plain_restore".to_string());
 
     let mut wallet = coinswap::wallet::Wallet::init(&original_wallet, &rpc_config, None).unwrap();
+    
+    let addr = wallet.get_next_external_address().unwrap();
+    send_and_mine(&mut bitcoind, &addr, 0.05, 1).unwrap();
 
     wallet.backup(&wallet_backup_file, None);
 
     let addr = wallet.get_next_external_address().unwrap();
-
-    send_to_address(&bitcoind, &addr, Amount::from_btc(0.05).unwrap());
-    generate_blocks(&bitcoind, 1);
+    send_and_mine(&mut bitcoind, &addr, 0.05, 1).unwrap();
 
     wallet.sync().unwrap();
 
@@ -136,14 +150,17 @@ fn encwallet_encbackup_encrestore() {
     });
 
 
+
     let mut wallet = coinswap::wallet::Wallet::init(&original_wallet, &rpc_config, km.clone()).unwrap();
+    
+    let addr = wallet.get_next_external_address().unwrap();
+    send_and_mine(&mut bitcoind, &addr, 0.05, 1).unwrap();
+    
     wallet.backup(&wallet_backup_file, km.clone());
     
 
     let addr = wallet.get_next_external_address().unwrap();
-
-    send_to_address(&bitcoind, &addr, Amount::from_btc(0.05).unwrap());
-    generate_blocks(&bitcoind, 1);
+    send_and_mine(&mut bitcoind, &addr, 0.05, 1).unwrap();
 
     wallet.sync().unwrap();
 
