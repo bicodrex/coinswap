@@ -29,7 +29,7 @@ use crate::utill;
 use crate::{
     protocol::contract,
     utill::{
-        compute_checksum, generate_keypair, get_hd_path_from_descriptor, prompt_password,
+        compute_checksum, generate_keypair, get_hd_path_from_descriptor,
         redeemscript_to_scriptpubkey, MIN_FEE_RATE,
     },
     wallet::security::{decrypt_struct, encrypt_struct, EncryptedData, KeyMaterial},
@@ -388,13 +388,16 @@ impl Wallet {
     }
 
     /// Restore interactive
-    pub fn restore_interactive(backup_file_path: &PathBuf, rpc_config: &RPCConfig, restore_name: String) {
+    pub fn restore_interactive(
+        backup_file_path: &PathBuf,
+        rpc_config: &RPCConfig,
+        restore_name: String,
+    ) {
         println!(
             "Initiating wallet restore, from backup: {:?}",
             backup_file_path
         );
 
-        
         let content = fs::read_to_string(&backup_file_path).expect("Failed to read backup");
 
         let restore_enc_password = utill::prompt_password(
@@ -406,14 +409,11 @@ impl Wallet {
         } else {
             Some(KeyMaterial::new_from_password(restore_enc_password))
         };
-        
-        
+
         // Try WalletBackup first
-        let backup_enc_material = if let Ok(_) = serde_json::from_str::<WalletBackup>(&content)
-        {
+        let backup_enc_material = if let Ok(_) = serde_json::from_str::<WalletBackup>(&content) {
             None
-        } else if let Ok(encrypted_wallet_backup) =
-            serde_json::from_str::<EncryptedData>(&content)
+        } else if let Ok(encrypted_wallet_backup) = serde_json::from_str::<EncryptedData>(&content)
         {
             println!("The backup you are trying to restore is encrypted!");
 
@@ -443,7 +443,7 @@ impl Wallet {
             backup_enc_material,
             restore_enc_material,
         );
-        
+
         // println!(
         //     "Wallet Restore Ended, this is the wallet: {:?}",
         //     restored_wallet
