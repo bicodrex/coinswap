@@ -9,7 +9,10 @@ use std::{fs, path::PathBuf};
 
 use aes_gcm::{aead::OsRng, AeadCore, Aes256Gcm};
 use bitcoin::{Address, Amount};
-use bitcoind::{bitcoincore_rpc::{self, Auth}, BitcoinD};
+use bitcoind::{
+    bitcoincore_rpc::{self, Auth},
+    BitcoinD,
+};
 use log::info;
 
 use coinswap::wallet::{KeyMaterial, RPCConfig, WalletBackup};
@@ -37,7 +40,7 @@ fn setup(
 
     let original_wallet_name = "original-wallet".to_string();
     let original_wallet = wallets_dir.join(&original_wallet_name);
-    let wallet_backup_file = wallets_dir.join("wallet-backup".to_string());
+    let wallet_backup_file = wallets_dir.join("wallet-backup");
     let restored_wallet_name = "restored-wallet".to_string();
     let restored_wallet_file = wallets_dir.join(&restored_wallet_name);
 
@@ -70,18 +73,16 @@ fn cleanup(bitcoind: &mut BitcoinD) {
     bitcoind.stop().unwrap();
 }
 
-
 fn send_and_mine(
     bitcoind: &mut BitcoinD,
     address: &Address,
     btc_amount: f64,
     blocks_to_generate: u64,
 ) -> Result<(), bitcoincore_rpc::Error> {
-    send_to_address(&bitcoind, address, Amount::from_btc(btc_amount)?);
-    generate_blocks(&bitcoind, blocks_to_generate);
+    send_to_address(bitcoind, address, Amount::from_btc(btc_amount)?);
+    generate_blocks(bitcoind, blocks_to_generate);
     Ok(())
 }
-
 
 #[test]
 fn plainwallet_plainbackup_plainrestore() {
@@ -97,7 +98,7 @@ fn plainwallet_plainbackup_plainrestore() {
     ) = setup("plain_wallet_plainbackup_plain_restore".to_string());
 
     let mut wallet = coinswap::wallet::Wallet::init(&original_wallet, &rpc_config, None).unwrap();
-    
+
     let addr = wallet.get_next_external_address().unwrap();
     send_and_mine(&mut bitcoind, &addr, 0.05, 1).unwrap();
 
@@ -114,7 +115,7 @@ fn plainwallet_plainbackup_plainrestore() {
         &wallet_backup_file,
         restored_wallet_name,
         None,
-        None
+        None,
     );
 
     assert_eq!(wallet, restored_wallet); // only compares .store!
@@ -149,15 +150,13 @@ fn encwallet_encbackup_encrestore() {
         nonce,
     });
 
+    let mut wallet =
+        coinswap::wallet::Wallet::init(&original_wallet, &rpc_config, km.clone()).unwrap();
 
-
-    let mut wallet = coinswap::wallet::Wallet::init(&original_wallet, &rpc_config, km.clone()).unwrap();
-    
     let addr = wallet.get_next_external_address().unwrap();
     send_and_mine(&mut bitcoind, &addr, 0.05, 1).unwrap();
-    
+
     wallet.backup(&wallet_backup_file, km.clone());
-    
 
     let addr = wallet.get_next_external_address().unwrap();
     send_and_mine(&mut bitcoind, &addr, 0.05, 1).unwrap();
@@ -170,11 +169,10 @@ fn encwallet_encbackup_encrestore() {
         &wallet_backup_file,
         restored_wallet_name,
         km.clone(),
-        km.clone()
+        km.clone(),
     );
 
     assert_eq!(wallet, restored_wallet); // only compares .store!
-
 
     cleanup(&mut bitcoind);
 }

@@ -85,12 +85,12 @@ impl WalletBackup {
     pub fn restore(
         wallet_path: &Path,
         rpc_config: &RPCConfig,
-        backup_file: &PathBuf,
+        backup_file: &Path,
         restore_name: String,
         backup_enc_material: Option<KeyMaterial>,
         restored_enc_material: Option<KeyMaterial>,
     ) -> Wallet {
-        let mut backup_file_with_ext = backup_file.clone();
+        let mut backup_file_with_ext = backup_file.to_path_buf();
         backup_file_with_ext.set_extension("json");
 
         let content = fs::read_to_string(&backup_file_with_ext).expect("Failed to read backup");
@@ -160,7 +160,7 @@ impl WalletBackup {
         tmp_wallet.save_to_disk().unwrap(); //Need to save after sync. due to offer_max_size not saving.
                                             //TODO check this final statements later
                                             //tmp_wallet.refresh_offer_maxsize_cache().unwrap();
-        return tmp_wallet;
+        tmp_wallet
     }
 }
 
@@ -356,15 +356,15 @@ impl Wallet {
     }
     /// Get the name
     pub fn get_name(&self) -> &str {
-        return &self.store.file_name;
+        &self.store.file_name
     }
 
     /// Backup the wallet
-    pub fn backup(&self, path: &PathBuf, backup_enc_material: Option<KeyMaterial>) {
+    pub fn backup(&self, path: &Path, backup_enc_material: Option<KeyMaterial>) {
         let mut backup_path = path.join("");
         backup_path.set_extension("json");
 
-        println!("Backing up to {:?}", backup_path);
+        println!("Backing up to {backup_path:?}");
 
         let backup = WalletBackup::from(self);
 
@@ -393,12 +393,9 @@ impl Wallet {
         rpc_config: &RPCConfig,
         restore_name: String,
     ) {
-        println!(
-            "Initiating wallet restore, from backup: {:?}",
-            backup_file_path
-        );
+        println!("Initiating wallet restore, from backup: {backup_file_path:?}");
 
-        let content = fs::read_to_string(&backup_file_path).expect("Failed to read backup");
+        let content = fs::read_to_string(backup_file_path).expect("Failed to read backup");
 
         let restore_enc_password = utill::prompt_password(
             "Enter restored walled encryption passphrase(empty for no encryption): ",
@@ -411,7 +408,7 @@ impl Wallet {
         };
 
         // Try WalletBackup first
-        let backup_enc_material = if let Ok(_) = serde_json::from_str::<WalletBackup>(&content) {
+        let backup_enc_material = if serde_json::from_str::<WalletBackup>(&content).is_ok() {
             None
         } else if let Ok(encrypted_wallet_backup) = serde_json::from_str::<EncryptedData>(&content)
         {
@@ -437,8 +434,8 @@ impl Wallet {
         // FIXME: check why sometimes it gives me error when I try to load with different bitcoin core name
         let _restored_wallet = WalletBackup::restore(
             Path::new("./taker-wallet"), //Save the restored wallet in cur dir for debug
-            &rpc_config,
-            &backup_file_path,
+            rpc_config,
+            backup_file_path,
             restore_name,
             backup_enc_material,
             restore_enc_material,
@@ -509,7 +506,7 @@ impl Wallet {
             rpc,
             wallet_file_path: path.to_path_buf(),
             store,
-            store_enc_material: store_enc_material,
+            store_enc_material,
         })
     }
 

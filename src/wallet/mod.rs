@@ -19,10 +19,9 @@ pub use error::WalletError;
 pub(crate) use fidelity::{fidelity_redeemscript, FidelityBond, FidelityError};
 pub use rpc::RPCConfig;
 pub use security::KeyMaterial;
+pub use security::SerdeCbor;
+pub use security::SerdeJson;
 pub use spend::Destination;
 pub(crate) use swapcoin::{
     IncomingSwapCoin, OutgoingSwapCoin, SwapCoin, WalletSwapCoin, WatchOnlySwapCoin,
 };
-
-pub use security::SerdeCbor;
-pub use security::SerdeJson;

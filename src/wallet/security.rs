@@ -25,7 +25,7 @@ pub struct SerdeCbor;
 
 impl SerdeFormat for SerdeCbor {
     fn from_slice<T: DeserializeOwned>(input: &[u8]) -> Result<T, Box<dyn std::error::Error>> {
-        Ok(utill::deserialize_from_cbor::<T,Box<dyn std::error::Error>>(input.to_vec())?)
+        utill::deserialize_from_cbor::<T, Box<dyn std::error::Error>>(input.to_vec())
     }
 }
 
@@ -75,17 +75,17 @@ impl KeyMaterial {
                 .unwrap();
 
         if wallet_enc_password.is_empty() {
-            return None;
+            None
         } else {
-            return Some(KeyMaterial {
+            Some(KeyMaterial {
                 key: pbkdf2_hmac_array::<Sha256, 32>(
                     wallet_enc_password.as_bytes(),
                     PBKDF2_SALT,
                     PBKDF2_ITERATIONS,
                 ),
                 nonce: Some(Aes256Gcm::generate_nonce(&mut OsRng).as_slice().to_vec()),
-            });
-        };
+            })
+        }
     }
     /// Existing from password
     pub fn existing_from_password(password: String) -> Self {
@@ -187,7 +187,7 @@ pub fn load_sensitive_struct_interactive<
 >(
     path: &Path,
 ) -> Result<(T, Option<KeyMaterial>), E> {
-    let content = fs::read(&path).expect(format!("Failed to read the file: {:?}", path).as_str());
+    let content = fs::read(path).unwrap_or_else(|_| panic!("Failed to read the file: {:?}", path));
 
     let sensitive_struct;
     let encryption_material;
@@ -204,7 +204,7 @@ pub fn load_sensitive_struct_interactive<
         );
 
         sensitive_struct = decrypt_struct::<T, E>(encrypted_wallet_backup, &enc_material)
-            .expect(format!("Failed to deserialize file: {:?}", path).as_str());
+            .unwrap_or_else(|_| panic!("Failed to deserialize file: {:?}", path));
         encryption_material = Some(enc_material);
     } else {
         panic!("Failed to deserialize file {:?}", path);
