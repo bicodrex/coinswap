@@ -3,16 +3,12 @@ use bitcoind::bitcoincore_rpc::Auth;
 use clap::Parser;
 use coinswap::{
     taker::{error::TakerError, SwapParams, Taker, TakerBehavior},
-    utill::{self, parse_proxy_auth, setup_taker_logger, ConnectionType, MIN_FEE_RATE, UTXO},
-    wallet::{Destination, KeyMaterial, RPCConfig, WalletBackup},
+    utill::{parse_proxy_auth, setup_taker_logger, ConnectionType, MIN_FEE_RATE, UTXO},
+    wallet::{Destination, RPCConfig, Wallet},
 };
 use log::LevelFilter;
 use serde_json::{json, to_string_pretty};
-use std::{
-    env, fs,
-    path::{Path, PathBuf},
-    str::FromStr,
-};
+use std::{path::PathBuf, str::FromStr};
 /// A simple command line app to operate as coinswap client.
 ///
 /// The app works as a regular Bitcoin wallet with the added capability to perform coinswaps. The app
