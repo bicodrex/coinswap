@@ -1810,7 +1810,10 @@ impl Wallet {
         Ok(self.rpc.send_raw_transaction(tx)?)
     }
 
-    pub fn sweep_incoming_swapcoins(&mut self, feerate: f64) -> Result<Vec<Txid>, WalletError> {
+    pub(crate) fn sweep_incoming_swapcoins(
+        &mut self,
+        feerate: f64,
+    ) -> Result<Vec<Txid>, WalletError> {
         let mut swept_txids = Vec::new();
 
         let completed_swapcoins: Vec<_> = self
