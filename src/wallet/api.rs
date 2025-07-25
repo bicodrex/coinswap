@@ -7,8 +7,6 @@ use std::{convert::TryFrom, env, fmt::Display, fs, io::Write, path::PathBuf, str
 
 use std::collections::HashMap;
 
-use aes_gcm::{aead::Aead, Aes256Gcm, Key, KeyInit};
-
 use crate::wallet::Destination;
 
 use bip39::Mnemonic;

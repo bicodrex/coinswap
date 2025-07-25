@@ -231,9 +231,6 @@ fn main() -> Result<(), TakerError> {
                     let coins_to_spend = taker
                         .get_wallet_mut()
                         .coin_select(amount, feerate.unwrap_or(MIN_FEE_RATE))?;
-                    let coins_to_spend = taker
-                        .get_wallet_mut()
-                        .coin_select(amount, feerate.unwrap_or(MIN_FEE_RATE))?;
 
                     let outputs = vec![(Address::from_str(address)?.assume_checked(), amount)];
                     let destination = Destination::Multi {
