@@ -3,14 +3,9 @@
 //! Currently, wallet synchronization is exclusively performed through RPC for makers.
 //! In the future, takers might adopt alternative synchronization methods, such as lightweight wallet solutions.
 
-use std::{convert::TryFrom, fmt::Display, path::PathBuf, str::FromStr};
+use std::{convert::TryFrom, env, fmt::Display, fs, io::Write, path::PathBuf, str::FromStr};
 
 use std::collections::HashMap;
-
-use aes_gcm::{
-    aead::{AeadCore, OsRng},
-    Aes256Gcm,
-};
 
 use crate::wallet::Destination;
 
@@ -21,21 +16,24 @@ use bitcoin::{
     secp256k1,
     secp256k1::{Secp256k1, SecretKey},
     sighash::{EcdsaSighashType, SighashCache},
-    Address, Amount, OutPoint, PublicKey, Script, ScriptBuf, Transaction, Txid, VarInt, Weight,
+    Address, Amount, Network, OutPoint, PublicKey, Script, ScriptBuf, Transaction, Txid, VarInt,
+    Weight,
 };
 use bitcoind::bitcoincore_rpc::{bitcoincore_rpc_json::ListUnspentResultEntry, Client, RpcApi};
-use pbkdf2::pbkdf2_hmac_array;
 use serde::{Deserialize, Serialize};
-use sha2::Sha256;
 use std::path::Path;
 
 use crate::{
     protocol::contract,
+    utill,
     utill::{
-        compute_checksum, generate_keypair, get_hd_path_from_descriptor, prompt_password,
+        compute_checksum, generate_keypair, get_hd_path_from_descriptor,
         redeemscript_to_scriptpubkey, MIN_FEE_RATE,
     },
-    wallet::split_utxos::MAX_SPLITS,
+    wallet::{
+        security::{decrypt_struct, encrypt_struct, EncryptedData, KeyMaterial},
+        split_utxos::MAX_SPLITS,
+    },
 };
 
 use rust_coinselect::{
@@ -57,32 +55,113 @@ use super::{
 
 const HARDENDED_DERIVATION: &str = "m/84'/1'/0'";
 
-/// Salt used for key derivation from a user-provided passphrase.
-const PBKDF2_SALT: &[u8; 8] = b"coinswap";
-/// Number of PBKDF2 iterations to strengthen passphrase-derived keys.
-///
-/// In production, this is set to **600,000 iterations**, following
-/// modern password security guidance from the
-/// [OWASP Password Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html).
-///
-/// During testing or integration tests, the iteration count is reduced to 1
-/// for performance.
-const PBKDF2_ITERATIONS: u32 = if cfg!(feature = "integration-test") || cfg!(test) {
-    1
-} else {
-    600_000
-};
+/// Represents a wallet backup
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WalletBackup {
+    /// Add some type of versioning? maybe coinswap version?
+    /// Also add date of export for backup?
 
-/// Holds derived cryptographic key material used for encrypting and decrypting wallet data.
-#[derive(Debug, Clone)]
-pub struct KeyMaterial {
-    /// A 256-bit key derived from the user’s passphrase via PBKDF2.
-    /// This key is used with AES-GCM for encryption/decryption.
-    pub key: [u8; 32],
-    /// Nonce used for AES-GCM encryption, generated when a new wallet is created.
-    /// When loading an existing wallet, this is initially `None`.
-    /// It is populated after reading the stored nonce from disk.
-    pub nonce: Option<Vec<u8>>,
+    /// Network the wallet operates on.
+    pub(crate) network: Network, //Can be asked to the user, but is nice to save
+    /// The master key for the wallet.
+    pub(super) master_key: Xpriv,
+
+    pub(super) wallet_birthday: Option<u64>, //Avoid scanning from genesis block
+    /// The file name associated with the wallet store.
+    pub file_name: String, //Can be asked to user, or stored for convenience
+}
+impl From<&Wallet> for WalletBackup {
+    fn from(wallet: &Wallet) -> Self {
+        WalletBackup {
+            network: (wallet.store.network),
+            master_key: (wallet.store.master_key),
+            wallet_birthday: (wallet.store.wallet_birthday),
+            file_name: (wallet.store.file_name.clone()),
+        }
+    }
+}
+impl WalletBackup {
+    /// Restore the wallet (return a walletfile)
+    pub fn restore(
+        wallet_path: &Path,
+        rpc_config: &RPCConfig,
+        backup_file: &Path,
+        restore_name: String,
+        backup_enc_material: Option<KeyMaterial>,
+        restored_enc_material: Option<KeyMaterial>,
+    ) -> Wallet {
+        let mut backup_file_with_ext = backup_file.to_path_buf();
+        backup_file_with_ext.set_extension("json");
+
+        let content = fs::read_to_string(&backup_file_with_ext).expect("Failed to read backup");
+
+        let wallet_backup;
+        // Try WalletBackup first
+        if let Ok(unencrypted_wallet_backup) = serde_json::from_str::<WalletBackup>(&content) {
+            wallet_backup = unencrypted_wallet_backup;
+        } else if let Ok(encrypted_wallet_backup) = serde_json::from_str::<EncryptedData>(&content)
+        {
+            wallet_backup = decrypt_struct::<WalletBackup, WalletError>(
+                encrypted_wallet_backup,
+                &backup_enc_material.unwrap(),
+            )
+            .expect("Failed to deserialize wallet backup file");
+        } else {
+            panic!("Failed to deserialize wallet backup file");
+        }
+
+        //println!("Backup content: {}", content);
+
+        //println!("Wallet_Backup: {:?}", wallet_backup);
+
+        //let data_dir = data_dir.unwrap_or(get_taker_dir());
+        //let wallets_dir = data_dir.join("wallets");
+
+        // Use the provided name or default to `taker-wallet` if not specified.
+
+        //let wallet_file_name = wallet_backup.file_name.clone();
+        let wallet_file_name = restore_name;
+
+        //let wallet_path = wallets_dir.join(&wallet_file_name);
+        let mut rpc_config_test = rpc_config.clone();
+        rpc_config_test.wallet_name = wallet_file_name;
+
+        let rpc = Client::try_from(&rpc_config_test).unwrap();
+        let network = wallet_backup.network;
+
+        let master_key = wallet_backup.master_key;
+
+        // Initialise wallet
+        let file_name = wallet_path
+            .file_name()
+            .expect("file name expected")
+            .to_str()
+            .expect("expected")
+            .to_string();
+
+        let wallet_birthday = wallet_backup.wallet_birthday;
+        let store = WalletStore::init(
+            file_name,
+            wallet_path,
+            network,
+            master_key,
+            wallet_birthday,
+            &restored_enc_material,
+        )
+        .unwrap();
+
+        let mut tmp_wallet = Wallet {
+            rpc,
+            wallet_file_path: wallet_path.to_path_buf(),
+            store,
+            store_enc_material: restored_enc_material,
+        };
+        tmp_wallet.sync().unwrap();
+        tmp_wallet.save_to_disk().unwrap(); //Need to save after sync. due to offer_max_size not saving.
+                                            //TODO check this final statements later
+                                            //tmp_wallet.refresh_offer_maxsize_cache().unwrap();
+        tmp_wallet
+    }
 }
 
 /// Represents a Bitcoin wallet with associated functionality and data.
@@ -95,6 +174,23 @@ pub struct Wallet {
     /// If present, wallet data will be encrypted/decrypted using AES-GCM.
     /// The original passphrase is never stored—only the derived key is kept in memory.
     store_enc_material: Option<KeyMaterial>,
+}
+impl PartialEq for Wallet {
+    fn eq(&self, other: &Self) -> bool {
+        //self.store == other.store
+        //avoided filename
+        self.store.network == other.store.network &&
+        self.store.master_key == other.store.master_key &&
+        self.store.external_index == other.store.external_index &&
+        self.store.offer_maxsize == other.store.offer_maxsize &&
+        //avoided incoming_swapcoins
+        //avoided outgoing_swapcoins
+        //avoided prevout_to_contract_map
+        self.store.fidelity_bond == other.store.fidelity_bond &&
+        //avoided last_synced_height
+        self.store.wallet_birthday == other.store.wallet_birthday &&
+        self.store.utxo_cache == other.store.utxo_cache
+    }
 }
 
 /// Specify the keychain derivation path from [`HARDENDED_DERIVATION`]
@@ -242,7 +338,14 @@ impl Wallet {
             .to_string();
 
         let wallet_birthday = rpc.get_block_count()?;
-        let store = WalletStore::init(file_name, path, network, master_key, Some(wallet_birthday))?;
+        let store = WalletStore::init(
+            file_name,
+            path,
+            network,
+            master_key,
+            Some(wallet_birthday),
+            &store_enc_material,
+        )?;
 
         Ok(Self {
             rpc,
@@ -251,16 +354,127 @@ impl Wallet {
             store_enc_material,
         })
     }
+    /// Get the name
+    pub fn get_name(&self) -> &str {
+        &self.store.file_name
+    }
+
+    /// Backup the wallet
+    pub fn backup(&self, path: &Path, backup_enc_material: Option<KeyMaterial>) {
+        let mut backup_path = path.join("");
+        backup_path.set_extension("json");
+
+        println!("Backing up to {backup_path:?}");
+
+        let backup = WalletBackup::from(self);
+
+        let json = serde_json::to_string_pretty(&backup).unwrap();
+
+        match backup_enc_material {
+            Some(key_material) => {
+                //TODO: Check json serialization(like this CBOR is encrypted and then stored json)
+                let encrypted = encrypt_struct(backup, &key_material).unwrap();
+
+                let encrypted_json = serde_json::to_string_pretty(&encrypted).unwrap();
+                let mut file = fs::File::create(backup_path).unwrap();
+                file.write_all(encrypted_json.as_bytes()).unwrap();
+            }
+            None => {
+                println!("Warning! The wallet backup file will be saved unencrypted!");
+                let mut file = fs::File::create(backup_path).unwrap();
+                file.write_all(json.as_bytes()).unwrap();
+            }
+        }
+    }
+
+    /// Restore interactive
+    pub fn restore_interactive(
+        backup_file_path: &PathBuf,
+        rpc_config: &RPCConfig,
+        restore_name: String,
+    ) {
+        println!("Initiating wallet restore, from backup: {backup_file_path:?}");
+
+        let content = fs::read_to_string(backup_file_path).expect("Failed to read backup");
+
+        let restore_enc_password = utill::prompt_password(
+            "Enter restored walled encryption passphrase(empty for no encryption): ",
+        )
+        .unwrap();
+        let restore_enc_material = if restore_enc_password.is_empty() {
+            None
+        } else {
+            Some(KeyMaterial::new_from_password(restore_enc_password))
+        };
+
+        // Try WalletBackup first
+        let backup_enc_material = if serde_json::from_str::<WalletBackup>(&content).is_ok() {
+            None
+        } else if let Ok(encrypted_wallet_backup) = serde_json::from_str::<EncryptedData>(&content)
+        {
+            println!("The backup you are trying to restore is encrypted!");
+
+            let backup_enc_password =
+                utill::prompt_password("Enter wallet backup encryption passphrase: ").unwrap();
+
+            if backup_enc_password.is_empty() {
+                panic!("Backup encryption password cannot be empty!");
+            }
+
+            let nonce_vec = encrypted_wallet_backup.nonce.clone();
+
+            Some(KeyMaterial::existing_with_nonce(
+                backup_enc_password,
+                nonce_vec,
+            ))
+        } else {
+            panic!("Failed to deserialize wallet backup file");
+        };
+
+        // FIXME: check why sometimes it gives me error when I try to load with different bitcoin core name
+        let _restored_wallet = WalletBackup::restore(
+            Path::new("./taker-wallet"), //Save the restored wallet in cur dir for debug
+            rpc_config,
+            backup_file_path,
+            restore_name,
+            backup_enc_material,
+            restore_enc_material,
+        );
+
+        // println!(
+        //     "Wallet Restore Ended, this is the wallet: {:?}",
+        //     restored_wallet
+        // );
+        println!("Wallet Restore Ended!!");
+    }
+    /// Backup interactive
+    pub fn backup_interactive(wallet: &Self, encrypt: bool) {
+        println!("Initiating wallet backup.");
+
+        let backup_name = format!("{}-backup", wallet.get_name());
+        println!(
+            "Backing up wallet: {} to {}",
+            wallet.get_name(),
+            backup_name
+        );
+        let working_directory: PathBuf =
+            env::current_dir().expect("Failed to get current directory");
+
+        let backup_enc_material = if encrypt {
+            KeyMaterial::new_interactive()
+        } else {
+            None
+        };
+
+        wallet.backup(&working_directory.join(backup_name), backup_enc_material);
+        println!("Wallet Backup Ended");
+    }
 
     /// Load wallet data from file and connect to a core RPC.
     /// The core rpc wallet name, and wallet_id field in the file should match.
     /// If encryption material is provided, decrypt the wallet store using it.
-    pub(crate) fn load(
-        path: &Path,
-        rpc_config: &RPCConfig,
-        store_enc_material: &Option<KeyMaterial>,
-    ) -> Result<Wallet, WalletError> {
-        let (store, nonce) = WalletStore::read_from_disk(path, store_enc_material)?;
+    pub(crate) fn load(path: &Path, rpc_config: &RPCConfig) -> Result<Wallet, WalletError> {
+        let (store, store_enc_material) = WalletStore::read_from_disk(path)?;
 
         if rpc_config.wallet_name != store.file_name {
             return Err(WalletError::General(format!(
@@ -288,22 +502,11 @@ impl Wallet {
             store.outgoing_swapcoins.len()
         );
 
-        // The input `store_enc_material` has a key but no nonce before reading from disk.
-        // After reading, combine the key with the stored nonce to create a complete KeyMaterial
-        // used for subsequent encryption/decryption operations.
-        let updated_enc_material = match (store_enc_material, nonce) {
-            (Some(material), Some(nonce)) => Some(KeyMaterial {
-                key: material.key,
-                nonce: Some(nonce),
-            }),
-            _ => None,
-        };
-
         Ok(Self {
             rpc,
             wallet_file_path: path.to_path_buf(),
             store,
-            store_enc_material: updated_enc_material,
+            store_enc_material,
         })
     }
 
@@ -316,47 +519,17 @@ impl Wallet {
         path: &Path,
         rpc_config: &RPCConfig,
     ) -> Result<Wallet, WalletError> {
-        // For tests or integration tests, use a fixed password. Otherwise prompt user.
-        let wallet_enc_password = if cfg!(feature = "integration-test") || cfg!(test) {
-            "integration-test".to_string()
-        } else {
-            prompt_password("Enter wallet encryption passphrase (empty for no encryption): ")?
-        };
-
-        // If user entered empty password, no encryption key material is created.
-        let key = if wallet_enc_password.is_empty() {
-            None
-        } else {
-            // Derive a 256-bit encryption key from the passphrase using PBKDF2.
-            let derived_key = pbkdf2_hmac_array::<Sha256, 32>(
-                wallet_enc_password.as_bytes(),
-                PBKDF2_SALT,
-                PBKDF2_ITERATIONS,
-            );
-            // Generate a nonce only if creating a new wallet, else defer nonce reading.
-            let nonce = if path.exists() {
-                //Will be filled after loading, by the Wallet::load method
-                None
-            } else {
-                // Generate a fresh nonce for encrypting a new wallet.
-                let generated_nonce = Aes256Gcm::generate_nonce(&mut OsRng);
-                Some(generated_nonce.as_slice().to_vec())
-            };
-
-            Some(KeyMaterial {
-                key: derived_key,
-                nonce,
-            })
-        };
-
         let wallet = if path.exists() {
             // wallet already exists, load the wallet
-            let wallet = Wallet::load(path, rpc_config, &key)?;
+            let wallet = Wallet::load(path, rpc_config)?;
             log::info!("Wallet file at {path:?} successfully loaded.");
             wallet
         } else {
             // wallet doesn't exists at the given path, create a new one
-            let wallet = Wallet::init(path, rpc_config, key)?;
+
+            let store_enc_material = KeyMaterial::new_interactive();
+
+            let wallet = Wallet::init(path, rpc_config, store_enc_material)?;
 
             log::info!("New Wallet created at : {path:?}");
             wallet
@@ -375,7 +548,7 @@ impl Wallet {
     }
 
     /// Update the existing file. Error if path does not exist.
-    pub(crate) fn save_to_disk(&self) -> Result<(), WalletError> {
+    pub fn save_to_disk(&self) -> Result<(), WalletError> {
         self.store
             .write_to_disk(&self.wallet_file_path, &self.store_enc_material)
     }
@@ -835,7 +1008,7 @@ impl Wallet {
         Ok(filtered_utxos)
     }
 
-    pub fn list_live_hashlock_contract_spend_info(
+    pub(crate) fn list_live_hashlock_contract_spend_info(
         &self,
     ) -> Result<Vec<(ListUnspentResultEntry, UTXOSpendInfo)>, WalletError> {
         let all_valid_utxo = self.list_all_utxo_spend_info()?;
@@ -1637,7 +1810,10 @@ impl Wallet {
         Ok(self.rpc.send_raw_transaction(tx)?)
     }
 
-    pub fn sweep_incoming_swapcoins(&mut self, feerate: f64) -> Result<Vec<Txid>, WalletError> {
+    pub(crate) fn sweep_incoming_swapcoins(
+        &mut self,
+        feerate: f64,
+    ) -> Result<Vec<Txid>, WalletError> {
         let mut swept_txids = Vec::new();
 
         let completed_swapcoins: Vec<_> = self

@@ -1,0 +1,178 @@
+mod test_framework;
+
+// We just need wallet and bitcoind
+// Call just bitcoind and wallet api, by taking examples from test_framework mod.rs
+// Next call show demo of wallet backup and restore, both encrypted and unencrypted
+// Also I need to make a docs file `wallet_security.md`, with documentation and design doc for wallet encryption / decription and backup / restore mechanism and user guide. -> Use this as SOB blog post.
+
+use std::{fs, path::PathBuf};
+
+use aes_gcm::{aead::OsRng, AeadCore, Aes256Gcm};
+use bitcoin::{Address, Amount};
+use bitcoind::{
+    bitcoincore_rpc::{self, Auth},
+    BitcoinD,
+};
+use log::info;
+
+use coinswap::wallet::{KeyMaterial, RPCConfig, WalletBackup};
+use pbkdf2::pbkdf2_hmac_array;
+use sha2::Sha256;
+use test_framework::init_bitcoind;
+
+use crate::test_framework::{generate_blocks, send_to_address};
+
+fn setup(
+    test_name: String,
+) -> (
+    PathBuf,
+    RPCConfig,
+    PathBuf,
+    BitcoinD,
+    PathBuf,
+    std::string::String,
+) {
+    let temp_dir = std::env::temp_dir()
+        .join("coinswap")
+        .join("wallet-tests")
+        .join(test_name);
+    let wallets_dir = temp_dir.join("");
+
+    let original_wallet_name = "original-wallet".to_string();
+    let original_wallet = wallets_dir.join(&original_wallet_name);
+    let wallet_backup_file = wallets_dir.join("wallet-backup");
+    let restored_wallet_name = "restored-wallet".to_string();
+    let restored_wallet_file = wallets_dir.join(&restored_wallet_name);
+
+    if temp_dir.exists() {
+        fs::remove_dir_all(&temp_dir).unwrap();
+    }
+    //println!("temporary directory : {}", temp_dir.display());
+
+    let bitcoind = init_bitcoind(&temp_dir);
+
+    let url = bitcoind.rpc_url().split_at(7).1.to_string();
+    let auth = Auth::CookieFile(bitcoind.params.cookie_file.clone());
+
+    let rpc_config = RPCConfig {
+        url,
+        auth,
+        wallet_name: original_wallet_name.clone(),
+    };
+    (
+        original_wallet,
+        rpc_config,
+        wallet_backup_file,
+        bitcoind,
+        restored_wallet_file,
+        restored_wallet_name,
+    )
+}
+
+fn cleanup(bitcoind: &mut BitcoinD) {
+    bitcoind.stop().unwrap();
+}
+
+fn send_and_mine(
+    bitcoind: &mut BitcoinD,
+    address: &Address,
+    btc_amount: f64,
+    blocks_to_generate: u64,
+) -> Result<(), bitcoincore_rpc::Error> {
+    send_to_address(bitcoind, address, Amount::from_btc(btc_amount)?);
+    generate_blocks(bitcoind, blocks_to_generate);
+    Ok(())
+}
+
+#[test]
+fn plainwallet_plainbackup_plainrestore() {
+    info!("Running Test: Creating Wallet file, backing it up, then recieve a payment, and restore backup");
+
+    let (
+        original_wallet,
+        rpc_config,
+        wallet_backup_file,
+        mut bitcoind,
+        restored_wallet_file,
+        restored_wallet_name,
+    ) = setup("plain_wallet_plainbackup_plain_restore".to_string());
+
+    let mut wallet = coinswap::wallet::Wallet::init(&original_wallet, &rpc_config, None).unwrap();
+
+    let addr = wallet.get_next_external_address().unwrap();
+    send_and_mine(&mut bitcoind, &addr, 0.05, 1).unwrap();
+
+    wallet.backup(&wallet_backup_file, None);
+
+    let addr = wallet.get_next_external_address().unwrap();
+    send_and_mine(&mut bitcoind, &addr, 0.05, 1).unwrap();
+
+    wallet.sync().unwrap();
+
+    let restored_wallet = WalletBackup::restore(
+        &restored_wallet_file,
+        &rpc_config,
+        &wallet_backup_file,
+        restored_wallet_name,
+        None,
+        None,
+    );
+
+    assert_eq!(wallet, restored_wallet); // only compares .store!
+
+    //cleanup(&mut bitcoind);
+    cleanup(&mut bitcoind);
+
+    info!("🎉 Wallet Backup and Restore after tx test ran succefully!");
+}
+
+#[test]
+fn encwallet_encbackup_encrestore() {
+    let (
+        original_wallet,
+        rpc_config,
+        wallet_backup_file,
+        mut bitcoind,
+        restored_wallet_file,
+        restored_wallet_name,
+    ) = setup("encwallet_encbackup_encrestore".to_string());
+
+    let derived_key = pbkdf2_hmac_array::<Sha256, 32>("pass".as_bytes(), "salt".as_bytes(), 1);
+    // Generate a nonce only if creating a new wallet, else defer nonce reading.
+    let nonce = {
+        // Generate a fresh nonce for encrypting a new wallet.
+        let generated_nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+        Some(generated_nonce.as_slice().to_vec())
+    };
+
+    let km = Some(KeyMaterial {
+        key: derived_key,
+        nonce,
+    });
+
+    let mut wallet =
+        coinswap::wallet::Wallet::init(&original_wallet, &rpc_config, km.clone()).unwrap();
+
+    let addr = wallet.get_next_external_address().unwrap();
+    send_and_mine(&mut bitcoind, &addr, 0.05, 1).unwrap();
+
+    wallet.backup(&wallet_backup_file, km.clone());
+
+    let addr = wallet.get_next_external_address().unwrap();
+    send_and_mine(&mut bitcoind, &addr, 0.05, 1).unwrap();
+
+    wallet.sync().unwrap();
+
+    let restored_wallet = WalletBackup::restore(
+        &restored_wallet_file,
+        &rpc_config,
+        &wallet_backup_file,
+        restored_wallet_name,
+        km.clone(),
+        km.clone(),
+    );
+
+    assert_eq!(wallet, restored_wallet); // only compares .store!
+
+    cleanup(&mut bitcoind);
+}
