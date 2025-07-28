@@ -189,25 +189,31 @@ pub fn load_sensitive_struct_interactive<
 ) -> Result<(T, Option<KeyMaterial>), E> {
     let content = fs::read(path).unwrap_or_else(|_| panic!("Failed to read the file: {:?}", path));
 
-    let sensitive_struct;
-    let encryption_material;
-    // Try WalletBackup first
-    if let Ok(unencrypted_struct) = F::from_slice::<T>(&content) {
-        sensitive_struct = unencrypted_struct;
-        encryption_material = None;
-    } else if let Ok(encrypted_wallet_backup) = F::from_slice::<EncryptedData>(&content) {
-        let encryption_password = utill::prompt_password("Enter encryption passphrase: ").unwrap();
+    let (sensitive_struct, encryption_material) = match F::from_slice::<T>(&content) {
+        Ok(unencrypted_struct) => (unencrypted_struct, None),
+        Err(unencrypted_err) => match F::from_slice::<EncryptedData>(&content) {
+            Ok(encrypted_wallet_backup) => {
+                let encryption_password = utill::prompt_password("Enter encryption passphrase: ")
+                    .expect("Failed to read password");
 
-        let enc_material = KeyMaterial::existing_with_nonce(
-            encryption_password,
-            encrypted_wallet_backup.nonce.clone(),
-        );
+                let enc_material = KeyMaterial::existing_with_nonce(
+                    encryption_password,
+                    encrypted_wallet_backup.nonce.clone(),
+                );
 
-        sensitive_struct = decrypt_struct::<T, E>(encrypted_wallet_backup, &enc_material)
-            .unwrap_or_else(|_| panic!("Failed to deserialize file: {:?}", path));
-        encryption_material = Some(enc_material);
-    } else {
-        panic!("Failed to deserialize file {:?}", path);
-    }
+                let decrypted = decrypt_struct::<T, E>(encrypted_wallet_backup, &enc_material)
+                    .unwrap_or_else(|err| panic!("Failed to decrypt file {:?}: {:?}", path, err));
+
+                (decrypted, Some(enc_material))
+            }
+            Err(encrypted_err) => {
+                panic!(
+                    "Failed to deserialize file {:?}:\n- As unencrypted: {}\n- As encrypted: {}",
+                    path, unencrypted_err, encrypted_err
+                );
+            }
+        },
+    };
+
     Ok((sensitive_struct, encryption_material))
 }
