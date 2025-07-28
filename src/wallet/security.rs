@@ -165,7 +165,6 @@ pub(crate) struct EncryptedData {
     pub(crate) encrypted_payload: Vec<u8>,
 }
 
-
 /// Encrypts a serializable struct using AES-256-GCM encryption and CBOR serialization.
 ///
 /// This function applies the following transformation pipeline:
