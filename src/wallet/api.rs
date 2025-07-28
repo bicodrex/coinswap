@@ -58,9 +58,6 @@ const HARDENDED_DERIVATION: &str = "m/84'/1'/0'";
 /// Represents a wallet backup
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WalletBackup {
-    /// Add some type of versioning? maybe coinswap version?
-    /// Also add date of export for backup?
-
     /// Network the wallet operates on.
     pub(crate) network: Network, //Can be asked to the user, but is nice to save
     /// The master key for the wallet.
