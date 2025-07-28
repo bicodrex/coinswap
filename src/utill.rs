@@ -722,7 +722,7 @@ fn set_terminal_mode(fd: i32, echo: bool) {
 /// Prompts the user for a password using the given prompt string.
 /// Temporarily disables canonical mode and echo to mask each typed
 /// character with `*` as feedback.
-pub fn prompt_password(message: &'static str) -> std::io::Result<String> {
+pub fn prompt_password(message: String) -> std::io::Result<String> {
     if cfg!(feature = "integration-test") || cfg!(test) {
         Ok("integration-test".to_string())
     } else {

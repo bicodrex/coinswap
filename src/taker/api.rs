@@ -278,6 +278,29 @@ impl Taker {
         })
     }
 
+    /// TODO DOC
+    pub fn restore_wallet(
+        data_dir: Option<PathBuf>,
+        wallet_file_name: Option<String>,
+        rpc_config: Option<RPCConfig>,
+        backup_file: &String,
+    ) {
+        let backup_file_path = PathBuf::from(backup_file);
+        let restored_wallet_filename = wallet_file_name.unwrap_or("taker-wallet".to_string());
+
+        let restored_wallet_path = data_dir
+            .clone()
+            .unwrap_or(get_taker_dir())
+            .join("wallets")
+            .join(restored_wallet_filename);
+
+        Wallet::restore_interactive(
+            &backup_file_path,
+            &rpc_config.unwrap_or_default(),
+            &restored_wallet_path,
+        );
+    }
+
     /// Get wallet
     pub fn get_wallet(&self) -> &Wallet {
         &self.wallet

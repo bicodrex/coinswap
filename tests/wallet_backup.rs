@@ -7,7 +7,6 @@ mod test_framework;
 
 use std::{fs, path::PathBuf};
 
-use aes_gcm::{aead::OsRng, AeadCore, Aes256Gcm};
 use bitcoin::{Address, Amount};
 use bitcoind::{
     bitcoincore_rpc::{self, Auth},
@@ -15,23 +14,15 @@ use bitcoind::{
 };
 use log::info;
 
-use coinswap::wallet::{KeyMaterial, RPCConfig, WalletBackup};
-use pbkdf2::pbkdf2_hmac_array;
-use sha2::Sha256;
+use coinswap::wallet::{
+    load_sensitive_struct_interactive, KeyMaterial, RPCConfig, SerdeJson, WalletBackup, WalletError,
+};
+
 use test_framework::init_bitcoind;
 
 use crate::test_framework::{generate_blocks, send_to_address};
 
-fn setup(
-    test_name: String,
-) -> (
-    PathBuf,
-    RPCConfig,
-    PathBuf,
-    BitcoinD,
-    PathBuf,
-    std::string::String,
-) {
+fn setup(test_name: String) -> (PathBuf, RPCConfig, PathBuf, BitcoinD, PathBuf) {
     let temp_dir = std::env::temp_dir()
         .join("coinswap")
         .join("wallet-tests")
@@ -40,10 +31,9 @@ fn setup(
 
     let original_wallet_name = "original-wallet".to_string();
     let original_wallet = wallets_dir.join(&original_wallet_name);
-    let wallet_backup_file = wallets_dir.join("wallet-backup");
+    let wallet_backup_file = wallets_dir.join("wallet-backup.json");
     let restored_wallet_name = "restored-wallet".to_string();
     let restored_wallet_file = wallets_dir.join(&restored_wallet_name);
-
     if temp_dir.exists() {
         fs::remove_dir_all(&temp_dir).unwrap();
     }
@@ -65,7 +55,6 @@ fn setup(
         wallet_backup_file,
         bitcoind,
         restored_wallet_file,
-        restored_wallet_name,
     )
 }
 
@@ -88,14 +77,8 @@ fn send_and_mine(
 fn plainwallet_plainbackup_plainrestore() {
     info!("Running Test: Creating Wallet file, backing it up, then recieve a payment, and restore backup");
 
-    let (
-        original_wallet,
-        rpc_config,
-        wallet_backup_file,
-        mut bitcoind,
-        restored_wallet_file,
-        restored_wallet_name,
-    ) = setup("plain_wallet_plainbackup_plain_restore".to_string());
+    let (original_wallet, rpc_config, wallet_backup_file, mut bitcoind, restored_wallet_file) =
+        setup("plain_wallet_plainbackup_plain_restore".to_string());
 
     let mut wallet = coinswap::wallet::Wallet::init(&original_wallet, &rpc_config, None).unwrap();
 
@@ -109,14 +92,12 @@ fn plainwallet_plainbackup_plainrestore() {
 
     wallet.sync().unwrap();
 
-    let restored_wallet = WalletBackup::restore(
-        &restored_wallet_file,
-        &rpc_config,
+    let (backup, _) = load_sensitive_struct_interactive::<WalletBackup, WalletError, SerdeJson>(
         &wallet_backup_file,
-        restored_wallet_name,
-        None,
-        None,
-    );
+    )
+    .unwrap();
+
+    let restored_wallet = WalletBackup::restore(&backup, &restored_wallet_file, &rpc_config, None);
 
     assert_eq!(wallet, restored_wallet); // only compares .store!
 
@@ -128,27 +109,10 @@ fn plainwallet_plainbackup_plainrestore() {
 
 #[test]
 fn encwallet_encbackup_encrestore() {
-    let (
-        original_wallet,
-        rpc_config,
-        wallet_backup_file,
-        mut bitcoind,
-        restored_wallet_file,
-        restored_wallet_name,
-    ) = setup("encwallet_encbackup_encrestore".to_string());
+    let (original_wallet, rpc_config, wallet_backup_file, mut bitcoind, restored_wallet_file) =
+        setup("encwallet_encbackup_encrestore".to_string());
 
-    let derived_key = pbkdf2_hmac_array::<Sha256, 32>("pass".as_bytes(), "salt".as_bytes(), 1);
-    // Generate a nonce only if creating a new wallet, else defer nonce reading.
-    let nonce = {
-        // Generate a fresh nonce for encrypting a new wallet.
-        let generated_nonce = Aes256Gcm::generate_nonce(&mut OsRng);
-        Some(generated_nonce.as_slice().to_vec())
-    };
-
-    let km = Some(KeyMaterial {
-        key: derived_key,
-        nonce,
-    });
+    let km = KeyMaterial::new_interactive(None);
 
     let mut wallet =
         coinswap::wallet::Wallet::init(&original_wallet, &rpc_config, km.clone()).unwrap();
@@ -163,14 +127,13 @@ fn encwallet_encbackup_encrestore() {
 
     wallet.sync().unwrap();
 
-    let restored_wallet = WalletBackup::restore(
-        &restored_wallet_file,
-        &rpc_config,
+    let (backup, _) = load_sensitive_struct_interactive::<WalletBackup, WalletError, SerdeJson>(
         &wallet_backup_file,
-        restored_wallet_name,
-        km.clone(),
-        km.clone(),
-    );
+    )
+    .unwrap();
+
+    let restored_wallet =
+        WalletBackup::restore(&backup, &restored_wallet_file, &rpc_config, km.clone());
 
     assert_eq!(wallet, restored_wallet); // only compares .store!
 

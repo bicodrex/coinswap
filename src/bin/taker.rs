@@ -115,8 +115,6 @@ enum Commands {
     WalletRestore {
         #[clap(long, short = 'f')]
         backup_file: String,
-        #[clap(long, short = 'w')]
-        restored_wallet_name: String,
     },
 }
 
@@ -145,15 +143,12 @@ fn main() -> Result<(), TakerError> {
 
     match &args.command {
         // TODO, need to pass restore file name
-        Commands::WalletRestore {
-            backup_file,
-            restored_wallet_name,
-        } => {
-            let backup_file_path = PathBuf::from(backup_file);
-            Wallet::restore_interactive(
-                &backup_file_path,
-                &rpc_config,
-                restored_wallet_name.to_string(),
+        Commands::WalletRestore { backup_file } => {
+            Taker::restore_wallet(
+                args.data_directory,
+                args.wallet_name,
+                Some(rpc_config.clone()),
+                backup_file,
             );
         }
         _ => {

@@ -92,10 +92,12 @@ impl KeyMaterial {
     ///
     /// If the user enters an empty string, returns `None`, indicating no encryption.
     /// Otherwise, returns `Some(KeyMaterial)` with a newly generated nonce.
-    pub fn new_interactive() -> Option<Self> {
+    pub fn new_interactive(prompt: Option<String>) -> Option<Self> {
         let wallet_enc_password =
-            utill::prompt_password("Enter new encryption passphrase (empty for no encryption): ")
-                .unwrap();
+            utill::prompt_password(prompt.unwrap_or(
+                "Enter new encryption passphrase (empty for no encryption): ".to_string(),
+            ))
+            .unwrap();
 
         if wallet_enc_password.is_empty() {
             None
@@ -259,9 +261,9 @@ pub fn load_sensitive_struct_interactive<
         Ok(unencrypted_struct) => (unencrypted_struct, None),
         Err(unencrypted_err) => match F::from_slice::<EncryptedData>(&content) {
             Ok(encrypted_struct) => {
-                let encryption_password = utill::prompt_password("Enter encryption passphrase: ")
-                    .expect("Failed to read password");
-
+                let encryption_password =
+                    utill::prompt_password("Enter encryption passphrase: ".to_string())
+                        .expect("Failed to read password");
                 let enc_material = KeyMaterial::existing_with_nonce(
                     encryption_password,
                     encrypted_struct.nonce.clone(),
