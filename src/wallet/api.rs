@@ -3,13 +3,13 @@
 //! Currently, wallet synchronization is exclusively performed through RPC for makers.
 //! In the future, takers might adopt alternative synchronization methods, such as lightweight wallet solutions.
 
-use std::ffi::OsStr;
-use std::{convert::TryFrom, env, fmt::Display, fs, io::Write, path::PathBuf, str::FromStr};
+use std::{
+    convert::TryFrom, env, ffi::OsStr, fmt::Display, fs, io::Write, path::PathBuf, str::FromStr,
+};
 
 use std::collections::HashMap;
 
-use crate::wallet::security::load_sensitive_struct_interactive;
-use crate::wallet::{Destination, SerdeJson};
+use crate::wallet::{security::load_sensitive_struct_interactive, Destination, SerdeJson};
 
 use bip39::Mnemonic;
 use bitcoin::{
