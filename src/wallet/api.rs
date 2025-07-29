@@ -56,7 +56,12 @@ use super::{
 
 const HARDENDED_DERIVATION: &str = "m/84'/1'/0'";
 
-/// Represents a wallet backup
+/// Represents a wallet backup, containing all the necessary information to
+/// restore a wallet instance.
+///
+/// This struct captures the essential elements of a wallet's state, including
+/// its network, master key, creation time, and file name. It is serializable
+/// and can be persisted to disk or transferred for backup purposes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WalletBackup {
     /// Network the wallet operates on.
@@ -79,7 +84,20 @@ impl From<&Wallet> for WalletBackup {
     }
 }
 impl WalletBackup {
-    /// Restore the wallet (return a walletfile)
+    /// Restores a `Wallet` from this backup to a specified path.
+    ///
+    /// Initializes a new wallet instance using the data from the backup and syncs
+    /// it with the blockchain using the provided RPC configuration.
+    ///
+    /// # Returns
+    ///
+    /// A fully initialized and synced `Wallet` instance.
+    ///
+    /// # Behavior
+    ///
+    /// If `wallet_path` does not contain a file name, `wallet_backup.file_name` will be used.
+    /// The method initializes the wallet store, connects to the blockchain node via RPC,
+    /// syncs wallet data, and saves the state to disk.
     pub fn restore(
         wallet_backup: &Self,
         wallet_path: &Path,
@@ -134,6 +152,25 @@ pub struct Wallet {
     /// The original passphrase is never stored—only the derived key is kept in memory.
     store_enc_material: Option<KeyMaterial>,
 }
+/// Compares two wallets for cryptographic equivalence.
+///
+/// This comparison checks fields relevant to the cryptographic and functional
+/// state of the wallet, intentionally excluding fields that are:
+/// - related to file metadata (like `file_name`),
+/// - transient or runtime-only (e.g., swap coins, sync height),
+/// - dynamic (e.g., `prevout_to_contract_map`).
+///
+/// The fields checked include:
+/// - `network`
+/// - `master_key`
+/// - `external_index`
+/// - `offer_maxsize`
+/// - `fidelity_bond`
+/// - `wallet_birthday`
+/// - `utxo_cache`
+///
+/// This allows comparing whether two wallets represent the same core cryptographic
+/// identity and logic state, regardless of runtime or file system differences.
 impl PartialEq for Wallet {
     fn eq(&self, other: &Self) -> bool {
         //self.store == other.store
@@ -313,12 +350,21 @@ impl Wallet {
             store_enc_material,
         })
     }
-    /// Get the name
+    /// Get the wallet name
     pub fn get_name(&self) -> &str {
         &self.store.file_name
     }
 
-    /// Backup the wallet
+    /// Creates a backup of the wallet and writes it to the given path.
+    ///
+    /// The backup is saved as a `.json` file. If encryption material is provided,
+    /// the backup content is encrypted before being written.
+    ///
+    /// # Behavior
+    ///
+    /// - If encryption is used, the backup content is encrypted and serialized.
+    /// - If not, a warning is printed, and the backup is stored unencrypted.
+    /// - The final backup file will have a `.json` extension.
     pub fn backup(&self, path: &Path, backup_enc_material: Option<KeyMaterial>) {
         let mut backup_path = path.join("");
         backup_path.set_extension("json");
@@ -341,7 +387,20 @@ impl Wallet {
         file.write_all(backup_file_content.as_bytes()).unwrap();
     }
 
-    /// Restore interactive
+    /// Interactively restores a wallet from a backup file.
+    ///
+    /// This method loads a wallet backup from the given file path, prompts for decryption
+    /// if necessary, and then restores the wallet to a new location. During restoration,
+    /// the user is also prompted to provide a new encryption passphrase for the restored wallet.
+    ///
+    /// # Behavior
+    ///
+    /// - **Prompts for decryption passphrase** if the backup file is encrypted.
+    /// - Loads and decrypts the backup content.
+    /// - **Prompts for a new encryption passphrase** for the restored wallet.
+    /// - Initializes the wallet with the decrypted data and new encryption.
+    /// - Syncs the wallet with the blockchain.
+    /// - Saves the restored wallet to disk.
     pub fn restore_interactive(
         backup_file_path: &PathBuf,
         rpc_config: &RPCConfig,
@@ -362,12 +421,21 @@ impl Wallet {
             "Enter restored walled encryption passphrase(empty for no encryption): ".to_string(),
         ));
 
-        // FIXME: check why sometimes it gives me error when I try to load with different bitcoin core name
         WalletBackup::restore(&backup, restored_path, rpc_config, restore_enc_material);
 
         println!("Wallet Restore Ended!!");
     }
-    /// Backup interactive
+    /// Interactively creates a wallet backup, optionally encrypted.
+    ///
+    /// This is a user-friendly version of the [`backup`] method, which:
+    /// - Uses the current working directory as the backup location.
+    /// - Prompts the user to input encryption material (if `encrypt` is `true`).
+    ///
+    /// # Behavior
+    ///
+    /// - Prompts for encryption key if `encrypt == true`.
+    /// - Names the backup file as `{wallet_name}-backup.json`.
+    /// - Writes the backup to the current working directory.
     pub fn backup_interactive(wallet: &Self, encrypt: bool) {
         println!("Initiating wallet backup.");
         let backup_name = format!("{}-backup", wallet.get_name());

@@ -278,7 +278,18 @@ impl Taker {
         })
     }
 
-    /// TODO DOC
+    /// Restores a wallet from a backup file using the given configuration.
+    ///
+    /// This is a convenience wrapper around [`Wallet::restore_interactive`] that constructs the
+    /// wallet path from optional inputs.
+    ///
+    /// # Behavior
+    ///
+    /// Constructs the full wallet path as:
+    /// `{data_dir_or_default}/wallets/{wallet_file_name_or_default}`
+    ///
+    /// Then calls [`Wallet::restore_interactive`] with the resolved backup file path, RPC config,
+    /// and destination wallet path.
     pub fn restore_wallet(
         data_dir: Option<PathBuf>,
         wallet_file_name: Option<String>,
