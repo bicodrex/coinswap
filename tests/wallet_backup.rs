@@ -1,10 +1,5 @@
 mod test_framework;
 
-// We just need wallet and bitcoind
-// Call just bitcoind and wallet api, by taking examples from test_framework mod.rs
-// Next call show demo of wallet backup and restore, both encrypted and unencrypted
-// Also I need to make a docs file `wallet_security.md`, with documentation and design doc for wallet encryption / decription and backup / restore mechanism and user guide. -> Use this as SOB blog post.
-
 use std::{fs, path::PathBuf};
 
 use bitcoin::{Address, Amount};
